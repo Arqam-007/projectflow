@@ -10,6 +10,7 @@ export interface AuthorizedRequest extends AuthenticatedRequest {
   workspaceRole?: Role;
   project?: ProjectRecord;
   projectRole?: Role;
+  task?: unknown;
 }
 
 const ROLE_PRIORITY: Record<Role, number> = {
@@ -134,6 +135,36 @@ export function requireProjectRole(allowedRoles: Role[] = ['VIEWER', 'MEMBER', '
       req.project = project;
       req.projectRole = effectiveRole;
       next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+export function requireTaskRole(allowedRoles: Role[] = ['VIEWER', 'MEMBER', 'ADMIN', 'OWNER']) {
+  return async (req: AuthorizedRequest, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!req.user) {
+        throw new UnauthorizedError('Authentication required');
+      }
+
+      const taskId = req.params.taskId || req.body.taskId;
+      if (!taskId) {
+        throw new NotFoundError('Task parameter missing');
+      }
+
+      const { taskRepository } = await import('../repositories/task.repository.js');
+      const task = await taskRepository.findById(taskId);
+      if (!task) {
+        throw new NotFoundError('Task not found');
+      }
+
+      // Check project role for the task's project
+      req.params.projectId = task.projectId;
+      req.task = task;
+
+      // Delegate to requireProjectRole
+      return requireProjectRole(allowedRoles)(req, _res, next);
     } catch (err) {
       next(err);
     }

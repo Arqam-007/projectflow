@@ -51,7 +51,10 @@ export class PrismaProjectRepository implements IProjectRepository {
     );
   }
 
-  private notifyFallback() {
+  private notifyFallback(err?: unknown) {
+    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+      throw err || new Error('Database connection failed');
+    }
     if (!this.hasLoggedFallback) {
       console.warn(
         '[POSTGRES ADVISORY] PostgreSQL at localhost:5432 unreachable. Using in-memory project store for sandbox preview.'

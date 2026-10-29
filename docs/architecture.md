@@ -108,3 +108,54 @@ All API routes are prefixed under `/api/v1/`.
 | `POST` | `/api/v1/projects/:projectId/members` | Admin+ | Adds user to project with assigned role | `201` / `409` |
 | `PATCH` | `/api/v1/projects/:projectId/members/:userId` | Admin+ | Updates project member role | `200` / `403` |
 | `DELETE` | `/api/v1/projects/:projectId/members/:userId` | Member+ | Removes member from project | `200` / `400` |
+| `POST` | `/api/v1/projects/:projectId/tasks` | Member+ | Creates task with auto-incremented task number & key | `201` / `400` / `403` |
+| `GET` | `/api/v1/projects/:projectId/tasks` | Member+ | Lists tasks in project with status/priority/assignee filters | `200` / `403` / `404` |
+| `GET` | `/api/v1/tasks/:taskId` | Member+ | Retrieves task details, creator, assignee, and project | `200` / `404` |
+| `PATCH` | `/api/v1/tasks/:taskId` | Member+ | Updates task title, description, priority, assignee, due date | `200` / `400` / `403` |
+| `PATCH` | `/api/v1/tasks/:taskId/status` | Member+ | Validates & updates status according to state machine | `200` / `400` / `403` |
+| `DELETE` | `/api/v1/tasks/:taskId` | Creator/Admin/Owner | Deletes task (Members restricted to own tasks) | `200` / `403` / `404` |
+
+## 4. Task State Machine & Validation
+
+ProjectFlow enforces a strict status transition state machine on the backend. Arbitrary status jumps are rejected with `400 Bad Request`.
+
+```
+        ┌──────────────┐
+        │   BACKLOG    │
+        └──────┬───────┘
+               │ (TODO, IN_PROGRESS)
+               ▼
+        ┌──────────────┐
+   ┌───►│     TODO     │◄───────────────────┐
+   │    └──────┬───────┘                    │
+   │           │ (IN_PROGRESS, BACKLOG)     │ (Reopened)
+   │           ▼                            │
+   │    ┌──────────────┐                    │
+   └───►│ IN_PROGRESS  │◄──────┐            │
+        └──────┬───────┘       │            │
+               │ (IN_REVIEW)   │ (Rework)   │
+               ▼               │            │
+        ┌──────────────┐       │            │
+        │  IN_REVIEW   ├───────┘            │
+        └──────┬───────┘                    │
+               │ (Approved)                 │
+               ▼                            │
+        ┌──────────────┐                    │
+        │     DONE     ├────────────────────┘
+        └──────────────┘
+```
+
+### Permitted Status Transitions Matrix
+
+| Current Status | Allowed Next Statuses | Business Rationale |
+|---|---|---|
+| `BACKLOG` | `TODO`, `IN_PROGRESS` | Backlogged items must be triaged to To Do or activated into sprint |
+| `TODO` | `IN_PROGRESS`, `IN_REVIEW`, `DONE`, `BACKLOG` | Standard task intake |
+| `IN_PROGRESS` | `IN_REVIEW`, `DONE`, `TODO`, `BACKLOG` | Active development or parked/blocked |
+| `IN_REVIEW` | `DONE` (approved), `IN_PROGRESS` (changes requested), `TODO` | Peer review verification gate |
+| `DONE` | `IN_PROGRESS` (reopened bug/task), `TODO` | Completed task lifecycle |
+
+### Task Assignee & RBAC Guard
+- **Assignee Membership Check**: A user can only be assigned to a task if they are an active member or owner of the parent project. Reassignment to external users returns `400 Bad Request`.
+- **Task Deletion Permission**: Only the original task creator, project Admin, or project Owner can delete a task. Other project members receive `403 Forbidden`.
+- **Viewer Role**: Viewers have read-only access and cannot create tasks, update status, or delete tasks.

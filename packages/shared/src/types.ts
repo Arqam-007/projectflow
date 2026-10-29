@@ -122,6 +122,8 @@ export interface UpdateProjectRequest {
 
 export interface TaskSummary {
   id: string;
+  taskNumber: number;
+  taskKey?: string;
   title: string;
   description?: string | null;
   status: TaskStatus;
@@ -131,8 +133,42 @@ export interface TaskSummary {
   projectId: string;
   creatorId: string;
   assigneeId?: string | null;
+  creator?: UserSummary;
+  assignee?: UserSummary | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreateTaskRequest {
+  title: string;
+  description?: string;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  dueDate?: string | null;
+  assigneeId?: string | null;
+  orderIndex?: number;
+}
+
+export interface UpdateTaskRequest {
+  title?: string;
+  description?: string;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  dueDate?: string | null;
+  assigneeId?: string | null;
+  orderIndex?: number;
+}
+
+export interface UpdateTaskStatusRequest {
+  status: TaskStatus;
+  orderIndex?: number;
+}
+
+export interface TaskFilterParams {
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assigneeId?: string;
+  search?: string;
 }
 
 export interface ApiResponse<T = unknown> {

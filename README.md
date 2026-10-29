@@ -16,7 +16,7 @@
 - **Authorization**: Role-Based Access Control (RBAC) with Owner, Admin, Member, Viewer permissions
 - **Database & ORM**: PostgreSQL 16, Prisma ORM
 - **Validation**: Zod (Strict runtime schema validation for request payloads, queries, and environment)
-- **Testing**: Vitest, Supertest (39 passing integration & unit tests)
+- **Testing**: Vitest, Supertest (62 passing integration & unit tests)
 - **DevOps & Containers**: Docker, Docker Compose, GitHub Actions CI
 
 ---
@@ -26,22 +26,23 @@
 ```
 projectflow/
 ├── apps/
-│   ├── web/src/              # Frontend React 19 SPA
+│   ├── web/src/              # Frontend React 19 SPA (Interactive Kanban Board, Modals)
 │   └── api/src/              # Backend Express REST API
 │       ├── config/           # Zod-validated environment config
-│       ├── controllers/      # Route controllers (auth, health, workspaces, projects)
-│       ├── middleware/       # JWT auth guard, RBAC guards, validation, logging, error handling
-│       ├── routes/v1/        # Versioned route registry (/api/v1/workspaces, /projects, /auth, /health)
-│       ├── services/         # WorkspaceService, ProjectService, AuthService, TokenService
-│       ├── repositories/     # WorkspaceRepo, ProjectRepo, UserRepo (Prisma & Memory adapters)
+│       ├── controllers/      # Route controllers (tasks, projects, workspaces, auth, health)
+│       ├── middleware/       # JWT auth guard, RBAC guards (requireTaskRole, requireProjectRole), validation, logging
+│       ├── routes/v1/        # Versioned route registry (/api/v1/{tasks,projects,workspaces,auth,health})
+│       ├── services/         # TaskService, ProjectService, WorkspaceService, AuthService, TokenService
+│       ├── repositories/     # TaskRepo, ProjectRepo, WorkspaceRepo, UserRepo (Prisma & Memory adapters)
 │       └── utils/            # Domain error classes (AppError, ConflictError, UnauthorizedError, ForbiddenError)
 ├── packages/
 │   └── shared/src/           # Shared domain models & Zod validation schemas
 ├── prisma/
-│   └── schema.prisma         # PostgreSQL schema definition with Prisma
+│   └── schema.prisma         # PostgreSQL schema definition with Prisma (Task model, taskNumber, relations)
 ├── tests/
-│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
+│   ├── api/tasks.test.ts      # Supertest task management & state machine tests (23 tests)
 │   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
+│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
 │   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)
 │   ├── api/health.test.ts     # Supertest health endpoint tests (2 tests)
 │   └── unit/validation.test.ts # Zod schema validation unit tests (4 tests)

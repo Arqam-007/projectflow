@@ -109,3 +109,48 @@ export const UpdateProjectSchema = z.object({
   description: z.string().trim().max(500, { message: 'Description cannot exceed 500 characters' }).optional(),
   status: ProjectStatusSchema.optional(),
 });
+
+export const TaskStatusSchema = z.enum(['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE']);
+
+export const TaskPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']);
+
+export const CreateTaskSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(2, { message: 'Task title must be at least 2 characters' })
+    .max(150, { message: 'Task title cannot exceed 150 characters' }),
+  description: z.string().trim().max(2000, { message: 'Description cannot exceed 2000 characters' }).optional(),
+  status: TaskStatusSchema.optional().default('TODO'),
+  priority: TaskPrioritySchema.optional().default('MEDIUM'),
+  dueDate: z.string().datetime({ offset: true }).nullable().optional().or(z.string().regex(/^\d{4}-\d{2}-\d{2}/).nullable().optional()),
+  assigneeId: z.string().uuid().nullable().optional().or(z.string().min(1).nullable().optional()),
+  orderIndex: z.coerce.number().int().min(0).optional().default(0),
+});
+
+export const UpdateTaskSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(2, { message: 'Task title must be at least 2 characters' })
+    .max(150, { message: 'Task title cannot exceed 150 characters' })
+    .optional(),
+  description: z.string().trim().max(2000, { message: 'Description cannot exceed 2000 characters' }).nullable().optional(),
+  status: TaskStatusSchema.optional(),
+  priority: TaskPrioritySchema.optional(),
+  dueDate: z.string().nullable().optional(),
+  assigneeId: z.string().nullable().optional(),
+  orderIndex: z.coerce.number().int().min(0).optional(),
+});
+
+export const UpdateTaskStatusSchema = z.object({
+  status: TaskStatusSchema,
+  orderIndex: z.coerce.number().int().min(0).optional(),
+});
+
+export const TaskFilterSchema = z.object({
+  status: TaskStatusSchema.optional(),
+  priority: TaskPrioritySchema.optional(),
+  assigneeId: z.string().optional(),
+  search: z.string().trim().optional(),
+});

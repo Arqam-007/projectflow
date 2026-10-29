@@ -48,4 +48,30 @@ router.patch(
 );
 router.delete('/:projectId/members/:userId', authenticateToken, requireProjectRole(), removeProjectMemberHandler);
 
+import {
+  createTaskHandler,
+  listProjectTasksHandler,
+} from '../../controllers/task.controller.js';
+import {
+  CreateTaskSchema,
+  TaskFilterSchema,
+} from '../../../../../packages/shared/src/schemas.js';
+import { validateQuery } from '../../middleware/validate.js';
+
+// Project Tasks
+router.post(
+  '/:projectId/tasks',
+  authenticateToken,
+  requireProjectRole(['MEMBER', 'ADMIN', 'OWNER']),
+  validateBody(CreateTaskSchema),
+  createTaskHandler
+);
+router.get(
+  '/:projectId/tasks',
+  authenticateToken,
+  requireProjectRole(),
+  validateQuery(TaskFilterSchema),
+  listProjectTasksHandler
+);
+
 export default router;

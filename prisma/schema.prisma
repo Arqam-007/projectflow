@@ -139,6 +139,7 @@ model ProjectMember {
 
 model Task {
   id          String       @id @default(uuid())
+  taskNumber  Int          @default(1)
   title       String
   description String?
   status      TaskStatus   @default(TODO)
@@ -157,6 +158,7 @@ model Task {
   assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
 
   @@index([projectId, status])
+  @@index([projectId, taskNumber])
   @@index([assigneeId])
   @@map("tasks")
 }

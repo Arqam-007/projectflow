@@ -38,6 +38,9 @@ export class PrismaUserRepository implements IUserRepository {
   }
 
   private notifyFallback(err: unknown) {
+    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+      throw err;
+    }
     if (!this.hasLoggedFallback) {
       console.warn(
         '[POSTGRES ADVISORY] PostgreSQL at localhost:5432 unreachable (Sandbox preview environment). Operating in standalone memory mode until local PostgreSQL container is running via `docker compose up -d`.'
