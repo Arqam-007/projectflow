@@ -13,9 +13,10 @@
 - **Frontend**: React 19, TypeScript (Strict), Tailwind CSS, Lucide Icons, Vite
 - **Backend**: Node.js 22, Express 4, TypeScript
 - **Authentication**: JWT (`jsonwebtoken`) with `tokenVersion` invalidation, Password hashing via `bcryptjs` (12 salt rounds)
+- **Authorization**: Role-Based Access Control (RBAC) with Owner, Admin, Member, Viewer permissions
 - **Database & ORM**: PostgreSQL 16, Prisma ORM
 - **Validation**: Zod (Strict runtime schema validation for request payloads, queries, and environment)
-- **Testing**: Vitest, Supertest (19 passing integration & unit tests)
+- **Testing**: Vitest, Supertest (39 passing integration & unit tests)
 - **DevOps & Containers**: Docker, Docker Compose, GitHub Actions CI
 
 ---
@@ -28,19 +29,21 @@ projectflow/
 │   ├── web/src/              # Frontend React 19 SPA
 │   └── api/src/              # Backend Express REST API
 │       ├── config/           # Zod-validated environment config
-│       ├── controllers/      # Route controllers (auth, health)
-│       ├── middleware/       # JWT auth guard, validation, logging, error handling
-│       ├── routes/v1/        # Versioned route registry (/api/v1/auth, /api/v1/health)
-│       ├── services/         # AuthService, PasswordService, TokenService, HealthService
-│       ├── repositories/     # IUserRepository, PrismaUserRepository, MemoryUserRepository
-│       └── utils/            # Domain error classes (AppError, ConflictError, UnauthorizedError)
+│       ├── controllers/      # Route controllers (auth, health, workspaces, projects)
+│       ├── middleware/       # JWT auth guard, RBAC guards, validation, logging, error handling
+│       ├── routes/v1/        # Versioned route registry (/api/v1/workspaces, /projects, /auth, /health)
+│       ├── services/         # WorkspaceService, ProjectService, AuthService, TokenService
+│       ├── repositories/     # WorkspaceRepo, ProjectRepo, UserRepo (Prisma & Memory adapters)
+│       └── utils/            # Domain error classes (AppError, ConflictError, UnauthorizedError, ForbiddenError)
 ├── packages/
 │   └── shared/src/           # Shared domain models & Zod validation schemas
 ├── prisma/
-│   └── schema.prisma         # PostgreSQL schema definition with Prisma (User with tokenVersion)
+│   └── schema.prisma         # PostgreSQL schema definition with Prisma
 ├── tests/
-│   ├── api/auth.test.ts      # Supertest authentication & security tests (13 tests)
-│   ├── api/health.test.ts    # Supertest health endpoint tests (2 tests)
+│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
+│   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
+│   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)
+│   ├── api/health.test.ts     # Supertest health endpoint tests (2 tests)
 │   └── unit/validation.test.ts # Zod schema validation unit tests (4 tests)
 ├── docs/
 │   └── architecture.md       # Detailed technical architecture reference
@@ -55,22 +58,35 @@ projectflow/
 
 ---
 
-## Authentication Endpoints (Milestone 2)
+## REST API Endpoints (Milestones 1–3)
 
 All API endpoints are versioned under `/api/v1/`.
 
 | Method | Endpoint | Authorization | Description | Status Code |
 |---|---|---|---|---|
-| `POST` | `/api/v1/auth/register` | None | Normalizes email, validates input with Zod, hashes password with bcrypt (salt 12), persists user, and returns JWT | `201 Created` |
-| `POST` | `/api/v1/auth/login` | None | Validates credentials against password hash, returns JWT token | `200 OK` |
-| `GET` | `/api/v1/auth/me` | `Bearer <token>` | Verifies JWT signature, expiration, and `tokenVersion`; returns user profile | `200 OK` (or `401 Unauthorized`) |
-| `POST` | `/api/v1/auth/logout` | `Bearer <token>` | Revokes token and increments `tokenVersion` on user record | `200 OK` |
-
-### Security Guarantees
-- **Bcrypt Hashing**: Passwords are salted with 12 rounds before database storage.
-- **Credential Protection**: Password hashes are strictly omitted from all response DTOs and logs.
-- **Safe Authentication Errors**: Login attempts with incorrect passwords or non-existent emails return identical `401 Unauthorized ("Invalid email or password")` errors, preventing user enumeration.
-- **Token Invalidation**: Calling `/api/v1/auth/logout` immediately invalidates the token using an in-memory revocation blocklist and increments the database `tokenVersion`, invalidating all tokens issued with that version.
+| `GET` | `/api/v1/health` | Public | Telemetry, server uptime, and database connection state | `200` |
+| `POST` | `/api/v1/auth/register` | Public | Normalizes email, hashes password with bcrypt, returns JWT | `201` |
+| `POST` | `/api/v1/auth/login` | Public | Validates credentials, issues JWT access token | `200` |
+| `POST` | `/api/v1/auth/logout` | `Bearer <token>` | Revokes token and increments `tokenVersion` | `200` |
+| `GET` | `/api/v1/auth/me` | `Bearer <token>` | Returns current authenticated user profile | `200` |
+| `POST` | `/api/v1/workspaces` | `Bearer <token>` | Creates a new workspace (caller assigned as `OWNER`) | `201` |
+| `GET` | `/api/v1/workspaces` | `Bearer <token>` | Lists workspaces accessible to current user | `200` |
+| `GET` | `/api/v1/workspaces/:workspaceId` | Member+ | Retrieves workspace details and current user role | `200` / `404` |
+| `PATCH` | `/api/v1/workspaces/:workspaceId` | Admin+ | Updates workspace name and description | `200` / `403` |
+| `DELETE` | `/api/v1/workspaces/:workspaceId` | Owner | Deletes workspace and cascades all projects | `200` / `403` |
+| `GET` | `/api/v1/workspaces/:workspaceId/members` | Member+ | Lists members and roles in workspace | `200` |
+| `POST` | `/api/v1/workspaces/:workspaceId/members` | Admin+ | Adds registered user by email to workspace | `201` / `409` |
+| `PATCH` | `/api/v1/workspaces/:workspaceId/members/:userId` | Admin+ | Updates workspace member role | `200` / `403` |
+| `DELETE` | `/api/v1/workspaces/:workspaceId/members/:userId` | Member+ | Removes member or allows leaving workspace | `200` / `400` |
+| `POST` | `/api/v1/workspaces/:workspaceId/projects` | Member+ | Creates project with unique key in workspace | `201` / `409` |
+| `GET` | `/api/v1/workspaces/:workspaceId/projects` | Member+ | Lists accessible projects in workspace | `200` |
+| `GET` | `/api/v1/projects/:projectId` | Member+ | Retrieves project details and current user role | `200` / `404` |
+| `PATCH` | `/api/v1/projects/:projectId` | Admin+ | Updates project name, description, or status | `200` / `403` |
+| `DELETE` | `/api/v1/projects/:projectId` | Owner | Deletes project and associated tasks | `200` / `403` |
+| `GET` | `/api/v1/projects/:projectId/members` | Member+ | Lists project members and roles | `200` |
+| `POST` | `/api/v1/projects/:projectId/members` | Admin+ | Adds user to project with assigned role | `201` / `409` |
+| `PATCH` | `/api/v1/projects/:projectId/members/:userId` | Admin+ | Updates project member role | `200` / `403` |
+| `DELETE` | `/api/v1/projects/:projectId/members/:userId` | Member+ | Removes member from project | `200` / `400` |
 
 ---
 
@@ -103,10 +119,6 @@ Launch the PostgreSQL 16 Alpine container via Docker Compose:
 ```bash
 docker compose up -d
 ```
-Verify the container is healthy:
-```bash
-docker compose ps
-```
 
 ### 4. Install Dependencies & Generate Prisma Client
 ```bash
@@ -115,23 +127,23 @@ npx prisma generate
 ```
 
 ### 5. Run Database Migrations
-Apply the initial PostgreSQL schema:
+Apply the PostgreSQL schema migrations:
 ```bash
-npx prisma migrate dev --name add_auth
+npx prisma migrate dev --name add_workspaces_projects_rbac
 ```
 
 ### 6. Start the Full-Stack Development Server
 ```bash
 npm run dev
 ```
-- Web Application & Auth Playground: [http://localhost:3000](http://localhost:3000)
+- Web Application & RBAC Workspace UI: [http://localhost:3000](http://localhost:3000)
 - API Health Endpoint: [http://localhost:3000/api/v1/health](http://localhost:3000/api/v1/health)
 
 ---
 
 ## Running Automated Tests
 
-To run the complete test suite (19 integration and unit tests):
+To run the complete test suite (39 integration and unit tests):
 ```bash
 npm run test
 ```
@@ -147,7 +159,7 @@ npm run lint
 
 - [x] **Milestone 1**: Project Scaffolding, Express `/api/v1`, Prisma PostgreSQL Schema, Docker Compose, CI, and SaaS Shell
 - [x] **Milestone 2**: Authentication & User Management (JWT, Password Hashing, Profile API, Auth UI & Guards)
-- [ ] **Milestone 3**: Project Creation, Workspaces & Role-Based Access Control (RBAC)
+- [x] **Milestone 3**: Workspaces, Project Creation and Management, Project Membership, and RBAC
 - [ ] **Milestone 4**: Task Management & Interactive Kanban Board
 - [ ] **Milestone 5**: Executive Analytics Dashboard & Activity Audit Feeds
 - [ ] **Milestone 6**: Automated Test Coverage Expansion & Portfolio Documentation Finalization

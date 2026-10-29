@@ -17,6 +17,14 @@ enum Role {
   VIEWER
 }
 
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
 enum TaskStatus {
   BACKLOG
   TODO
@@ -43,30 +51,71 @@ model User {
   updatedAt    DateTime        @updatedAt
 
   // Relationships
-  ownedProjects   Project[]       @relation("ProjectOwner")
-  memberships     ProjectMember[]
-  createdTasks    Task[]          @relation("TaskCreator")
-  assignedTasks   Task[]          @relation("TaskAssignee")
-  activityLogs    ActivityLog[]
+  ownedWorkspaces      Workspace[]       @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMember[]
+  ownedProjects        Project[]         @relation("ProjectOwner")
+  projectMemberships   ProjectMember[]
+  createdTasks         Task[]            @relation("TaskCreator")
+  assignedTasks        Task[]            @relation("TaskAssignee")
+  activityLogs         ActivityLog[]
 
   @@map("users")
 }
 
-model Project {
-  id          String          @id @default(uuid())
+model Workspace {
+  id          String            @id @default(uuid())
   name        String
-  key         String          // e.g. "PRJ", short code used for task issue keys
+  slug        String            @unique
   description String?
   ownerId     String
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   // Relationships
+  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  projects    Project[]
+
+  @@index([ownerId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        Role      @default(MEMBER)
+  joinedAt    DateTime  @default(now())
+
+  // Relationships
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("workspace_members")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+  key         String        // e.g. "PRJ", short code used for task issue keys
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  workspaceId String
+  ownerId     String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relationships
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner       User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     ProjectMember[]
   tasks       Task[]
   activities  ActivityLog[]
 
+  @@index([workspaceId])
   @@index([ownerId])
   @@map("projects")
 }

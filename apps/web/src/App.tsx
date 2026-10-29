@@ -31,22 +31,39 @@ import {
   Mail,
   ShieldCheck,
   Fingerprint,
+  Plus,
+  Briefcase,
+  ChevronDown,
+  Trash2,
+  UserPlus,
+  Crown,
+  ShieldAlert,
 } from 'lucide-react';
-import type { HealthResponse, UserSummary, AuthResponse } from '../../../packages/shared/src/types.js';
+import type {
+  HealthResponse,
+  UserSummary,
+  AuthResponse,
+  WorkspaceSummary,
+  WorkspaceMemberSummary,
+  ProjectSummary,
+  ProjectMemberSummary,
+  Role,
+  ProjectStatus,
+} from '../../../packages/shared/src/types.js';
 
 export default function App() {
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
-  const [activeTab, setActiveTab] = useState<'auth' | 'architecture' | 'schema' | 'endpoints' | 'devops'>('auth');
+  const [activeTab, setActiveTab] = useState<'workspaces' | 'auth' | 'rbac' | 'architecture' | 'devops'>('workspaces');
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   // Authentication State
   const [currentUser, setCurrentUser] = useState<UserSummary | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('projectflow_token'));
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('login');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Form inputs
+  // Auth form
   const [formName, setFormName] = useState('Sarah Jenkins');
   const [formEmail, setFormEmail] = useState('sarah.architect@projectflow.dev');
   const [formPassword, setFormPassword] = useState('SecurePass123!');
@@ -54,10 +71,34 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccessMsg, setAuthSuccessMsg] = useState<string | null>(null);
 
-  // Protected Route Test State
-  const [protectedData, setProtectedData] = useState<string | null>(null);
-  const [protectedTesting, setProtectedTesting] = useState(false);
-  const [protectedError, setProtectedError] = useState<string | null>(null);
+  // Workspaces & Projects State
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [workspaceRole, setWorkspaceRole] = useState<Role | null>(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [selectedProject, setSelectedProject] = useState<ProjectSummary | null>(null);
+  const [projectMembers, setProjectMembers] = useState<ProjectMemberSummary[]>([]);
+  const [loadingWorkspaceData, setLoadingWorkspaceData] = useState(false);
+  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
+  const [workspaceActionSuccess, setWorkspaceActionSuccess] = useState<string | null>(null);
+
+  // Creation Modals / Forms
+  const [showCreateWsModal, setShowCreateWsModal] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [newWsSlug, setNewWsSlug] = useState('');
+  const [newWsDesc, setNewWsDesc] = useState('');
+
+  const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectKey, setNewProjectKey] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [newProjectStatus, setNewProjectStatus] = useState<ProjectStatus>('ACTIVE');
+
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<Role>('MEMBER');
+  const [inviteTarget, setInviteTarget] = useState<'workspace' | 'project'>('workspace');
 
   const fetchHealth = async () => {
     setLoadingHealth(true);
@@ -84,15 +125,96 @@ export default function App() {
         const body = await res.json();
         if (body.success && body.data?.user) {
           setCurrentUser(body.data.user);
+          loadWorkspaces(currentToken);
           return;
         }
       }
-      // If invalid/revoked
       localStorage.removeItem('projectflow_token');
       setToken(null);
       setCurrentUser(null);
     } catch {
-      // Network failure
+      // Offline/error
+    }
+  };
+
+  const loadWorkspaces = async (authToken = token) => {
+    if (!authToken) return;
+    setLoadingWorkspaceData(true);
+    try {
+      const res = await fetch('/api/v1/workspaces', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const body = await res.json();
+      if (body.success && body.data) {
+        setWorkspaces(body.data);
+        if (body.data.length > 0 && !selectedWorkspace) {
+          selectWorkspace(body.data[0], authToken);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading workspaces:', err);
+    } finally {
+      setLoadingWorkspaceData(false);
+    }
+  };
+
+  const selectWorkspace = async (ws: WorkspaceSummary, authToken = token) => {
+    setSelectedWorkspace(ws);
+    setSelectedProject(null);
+    if (!authToken) return;
+
+    try {
+      // Fetch workspace details & current user role
+      const wsRes = await fetch(`/api/v1/workspaces/${ws.id}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const wsBody = await wsRes.json();
+      if (wsBody.success && wsBody.data) {
+        setWorkspaceRole(wsBody.data.currentUserRole || 'MEMBER');
+      }
+
+      // Fetch projects in workspace
+      const prjRes = await fetch(`/api/v1/workspaces/${ws.id}/projects`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const prjBody = await prjRes.json();
+      if (prjBody.success && prjBody.data) {
+        setProjects(prjBody.data);
+        if (prjBody.data.length > 0) {
+          selectProject(prjBody.data[0], authToken);
+        } else {
+          setSelectedProject(null);
+          setProjectMembers([]);
+        }
+      }
+
+      // Fetch workspace members
+      const memRes = await fetch(`/api/v1/workspaces/${ws.id}/members`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const memBody = await memRes.json();
+      if (memBody.success && memBody.data) {
+        setWorkspaceMembers(memBody.data);
+      }
+    } catch (err) {
+      console.error('Failed to load workspace details:', err);
+    }
+  };
+
+  const selectProject = async (prj: ProjectSummary, authToken = token) => {
+    setSelectedProject(prj);
+    if (!authToken) return;
+
+    try {
+      const memRes = await fetch(`/api/v1/projects/${prj.id}/members`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const memBody = await memRes.json();
+      if (memBody.success && memBody.data) {
+        setProjectMembers(memBody.data);
+      }
+    } catch (err) {
+      console.error('Failed to load project members:', err);
     }
   };
 
@@ -113,23 +235,18 @@ export default function App() {
       const res = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formName,
-          email: formEmail,
-          password: formPassword,
-        }),
+        body: JSON.stringify({ name: formName, email: formEmail, password: formPassword }),
       });
-
       const body = await res.json();
-      if (!res.ok || !body.success) {
-        throw new Error(body.error?.message || 'Registration failed');
-      }
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Registration failed');
 
       const authData: AuthResponse = body.data;
       setToken(authData.accessToken);
       setCurrentUser(authData.user);
       localStorage.setItem('projectflow_token', authData.accessToken);
-      setAuthSuccessMsg(`Registered successfully as ${authData.user.name}! JWT access token issued.`);
+      setAuthSuccessMsg(`Registered as ${authData.user.name}!`);
+      loadWorkspaces(authData.accessToken);
+      setActiveTab('workspaces');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -147,22 +264,18 @@ export default function App() {
       const res = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formEmail,
-          password: formPassword,
-        }),
+        body: JSON.stringify({ email: formEmail, password: formPassword }),
       });
-
       const body = await res.json();
-      if (!res.ok || !body.success) {
-        throw new Error(body.error?.message || 'Invalid credentials');
-      }
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Invalid email or password');
 
       const authData: AuthResponse = body.data;
       setToken(authData.accessToken);
       setCurrentUser(authData.user);
       localStorage.setItem('projectflow_token', authData.accessToken);
-      setAuthSuccessMsg(`Logged in successfully! Welcome back, ${authData.user.name}.`);
+      setAuthSuccessMsg(`Welcome back, ${authData.user.name}!`);
+      loadWorkspaces(authData.accessToken);
+      setActiveTab('workspaces');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -183,36 +296,125 @@ export default function App() {
       localStorage.removeItem('projectflow_token');
       setToken(null);
       setCurrentUser(null);
-      setProtectedData(null);
-      setAuthSuccessMsg('Logged out. Token invalidated on server.');
+      setWorkspaces([]);
+      setSelectedWorkspace(null);
+      setProjects([]);
+      setSelectedProject(null);
     }
   };
 
-  const testProtectedRoute = async (overrideToken?: string | null) => {
-    setProtectedTesting(true);
-    setProtectedError(null);
-    setProtectedData(null);
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch('/api/v1/workspaces', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newWsName,
+          slug: newWsSlug.trim() || undefined,
+          description: newWsDesc.trim() || undefined,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Failed to create workspace');
 
-    const tokenToSend = overrideToken !== undefined ? overrideToken : token;
+      setWorkspaceActionSuccess(`Workspace "${body.data.name}" created!`);
+      setShowCreateWsModal(false);
+      setNewWsName('');
+      setNewWsSlug('');
+      setNewWsDesc('');
+      await loadWorkspaces(token);
+      selectWorkspace(body.data, token);
+    } catch (err) {
+      setWorkspaceActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !selectedWorkspace) return;
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/v1/workspaces/${selectedWorkspace.id}/projects`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newProjectName,
+          key: newProjectKey.toUpperCase(),
+          description: newProjectDesc.trim() || undefined,
+          status: newProjectStatus,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Failed to create project');
+
+      setWorkspaceActionSuccess(`Project "${body.data.name}" [${body.data.key}] created!`);
+      setShowCreateProjectModal(false);
+      setNewProjectName('');
+      setNewProjectKey('');
+      setNewProjectDesc('');
+      selectWorkspace(selectedWorkspace, token);
+    } catch (err) {
+      setWorkspaceActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !selectedWorkspace) return;
+    setWorkspaceActionError(null);
 
     try {
-      const headers: Record<string, string> = {};
-      if (tokenToSend) {
-        headers['Authorization'] = `Bearer ${tokenToSend}`;
-      }
+      const endpoint =
+        inviteTarget === 'workspace'
+          ? `/api/v1/workspaces/${selectedWorkspace.id}/members`
+          : `/api/v1/projects/${selectedProject?.id}/members`;
 
-      const res = await fetch('/api/v1/auth/me', { headers });
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
       const body = await res.json();
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Failed to add member');
 
-      if (!res.ok || !body.success) {
-        setProtectedError(`HTTP ${res.status}: ${body.error?.message || 'Access denied'}`);
-      } else {
-        setProtectedData(JSON.stringify(body, null, 2));
+      setWorkspaceActionSuccess(`Added ${body.data.user.name} as ${body.data.role}!`);
+      setShowInviteModal(false);
+      setInviteEmail('');
+      if (inviteTarget === 'workspace') {
+        selectWorkspace(selectedWorkspace, token);
+      } else if (selectedProject) {
+        selectProject(selectedProject, token);
       }
     } catch (err) {
-      setProtectedError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setProtectedTesting(false);
+      setWorkspaceActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    if (!token || !confirm('Are you sure you want to delete this project?')) return;
+    try {
+      const res = await fetch(`/api/v1/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) throw new Error(body.error?.message || 'Failed to delete project');
+      setWorkspaceActionSuccess('Project deleted.');
+      if (selectedWorkspace) selectWorkspace(selectedWorkspace, token);
+    } catch (err) {
+      setWorkspaceActionError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -234,14 +436,14 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg tracking-tight text-white">ProjectFlow</span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                Milestone 2 • Auth Live
+                Milestone 3 • RBAC & Workspaces Live
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">Full-Stack Project & Task Engineering Platform</p>
           </div>
         </div>
 
-        {/* Live User Session & Telemetry Status in Navbar */}
+        {/* User Session & Status */}
         <div className="flex items-center gap-3">
           {currentUser ? (
             <div className="flex items-center gap-3 bg-slate-800/80 border border-slate-700/60 rounded-xl px-3 py-1.5 text-xs">
@@ -255,16 +457,18 @@ export default function App() {
               <button
                 onClick={handleLogout}
                 className="text-slate-400 hover:text-red-400 p-1 transition"
-                title="Sign out and invalidate token"
+                title="Sign out"
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
             </div>
           ) : (
-            <div className="hidden md:flex items-center gap-2 bg-slate-800/80 border border-slate-700/60 rounded-lg px-3 py-1.5 text-xs">
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
-              <span className="text-slate-400">Guest (Unauthenticated)</span>
-            </div>
+            <button
+              onClick={() => setActiveTab('auth')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
+            >
+              <Lock className="w-3.5 h-3.5" /> Sign In / Register
+            </button>
           )}
 
           <button
@@ -289,14 +493,36 @@ export default function App() {
               </div>
               <nav className="space-y-1">
                 <button
+                  onClick={() => setActiveTab('workspaces')}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'workspaces' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                >
+                  <span className="flex items-center gap-3">
+                    <Briefcase className="w-4 h-4 text-indigo-400" />
+                    Workspaces & Projects
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">M3</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('rbac')}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'rbac' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                >
+                  <span className="flex items-center gap-3">
+                    <ShieldCheck className="w-4 h-4" />
+                    RBAC Permission Matrix
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Specs</span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('auth')}
                   className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'auth' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
                 >
                   <span className="flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                    Auth Playground
+                    <Lock className="w-4 h-4" />
+                    Auth & Sessions
                   </span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">M2</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">M2</span>
                 </button>
 
                 <button
@@ -304,7 +530,7 @@ export default function App() {
                   className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'architecture' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
                 >
                   <span className="flex items-center gap-3">
-                    <LayoutDashboard className="w-4 h-4" />
+                    <FolderTree className="w-4 h-4" />
                     System Architecture
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">M1</span>
@@ -313,30 +539,10 @@ export default function App() {
                 <div className="relative group">
                   <button className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 text-left opacity-60 cursor-not-allowed">
                     <span className="flex items-center gap-3">
-                      <FolderTree className="w-4 h-4" />
-                      Projects
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">M3</span>
-                  </button>
-                </div>
-
-                <div className="relative group">
-                  <button className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 text-left opacity-60 cursor-not-allowed">
-                    <span className="flex items-center gap-3">
                       <Kanban className="w-4 h-4" />
-                      Kanban Board
+                      Tasks & Kanban
                     </span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">M4</span>
-                  </button>
-                </div>
-
-                <div className="relative group">
-                  <button className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 text-left opacity-60 cursor-not-allowed">
-                    <span className="flex items-center gap-3">
-                      <Users className="w-4 h-4" />
-                      Team & RBAC
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">M3</span>
                   </button>
                 </div>
               </nav>
@@ -346,27 +552,27 @@ export default function App() {
             <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-300">Roadmap Progress</span>
-                <span className="text-indigo-400 font-mono font-bold">2 / 6 Milestones</span>
+                <span className="text-emerald-400 font-mono font-bold">3 / 6 Completed</span>
               </div>
               <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-gradient-to-r from-emerald-500 to-indigo-500 h-full w-[33.3%] transition-all" />
+                <div className="bg-gradient-to-r from-emerald-500 via-indigo-500 to-violet-500 h-full w-[50%] transition-all" />
               </div>
               <div className="space-y-1.5 text-[11px] text-slate-400">
                 <div className="flex items-center gap-2 text-emerald-400 font-medium">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>M1: Core Architecture & Setup</span>
+                  <span>M1: Scaffolding & Setup</span>
                 </div>
                 <div className="flex items-center gap-2 text-emerald-400 font-medium">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>M2: Auth, JWT & Passwords (Live)</span>
+                  <span>M2: Auth, JWT & Passwords</span>
                 </div>
-                <div className="flex items-center gap-2 text-slate-400">
-                  <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex items-center justify-center text-[8px]">3</div>
-                  <span>M3: Projects & RBAC</span>
+                <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>M3: Workspaces, Projects & RBAC</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-400">
                   <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex items-center justify-center text-[8px]">4</div>
-                  <span>M4: Kanban & Tasks</span>
+                  <span>M4: Kanban Board & Tasks</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-400">
                   <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex items-center justify-center text-[8px]">5</div>
@@ -382,498 +588,510 @@ export default function App() {
 
           <div className="border-t border-slate-800/80 pt-3 text-[11px] text-slate-400 space-y-1">
             <div className="flex items-center justify-between">
-              <span>Hashing</span>
-              <span className="font-mono text-slate-300">Bcrypt (Salt 12)</span>
+              <span>RBAC Roles</span>
+              <span className="font-mono text-slate-300">Owner, Admin, Member</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Auth Strategy</span>
-              <span className="font-mono text-slate-300">JWT + Revocation</span>
+              <span>Isolation</span>
+              <span className="font-mono text-slate-300">Anti-IDOR Verified</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Tests</span>
-              <span className="font-mono text-emerald-400">19 Passing</span>
+              <span>Automated Tests</span>
+              <span className="font-mono text-emerald-400 font-bold">39 Passing</span>
             </div>
           </div>
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-8">
-          {/* Milestone 2 Status Banner */}
+          {/* Milestone 3 Banner */}
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 p-6 lg:p-8 shadow-xl">
             <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
             <div className="relative z-10 max-w-3xl space-y-4">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                Milestone 2 Verified & Tested
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Milestone 3 Verified: Workspaces, Projects & RBAC
               </div>
               <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white">
-                JWT Authentication, Password Hashing & Security Guards
+                Workspaces, Projects & Role-Based Access Control
               </h1>
               <p className="text-slate-300 text-sm lg:text-base leading-relaxed">
-                User registration, authentication, token issuance, and protected route authorization are fully active. All passwords are encrypted with bcrypt (12 rounds), inputs are strictly normalized and validated via Zod, and private endpoints are guarded by JWT middleware with token version invalidation on logout.
+                Multi-tenant workspace isolation, project lifecycle management, and rigorous role-based access control (Owner, Admin, Member, Viewer) are fully active. All actions are authenticated via JWT and authorized on the backend to prevent cross-workspace data leakage and IDOR vulnerabilities.
               </p>
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs w-fit">
-            <button
-              onClick={() => setActiveTab('auth')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${activeTab === 'auth' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Lock className="w-3.5 h-3.5" />
-              Auth Playground & Verification
-            </button>
-            <button
-              onClick={() => setActiveTab('architecture')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${activeTab === 'architecture' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <FolderTree className="w-3.5 h-3.5" />
-              Architecture & Files
-            </button>
-            <button
-              onClick={() => setActiveTab('schema')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${activeTab === 'schema' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Database className="w-3.5 h-3.5" />
-              Prisma Schema (User Model)
-            </button>
-            <button
-              onClick={() => setActiveTab('endpoints')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${activeTab === 'endpoints' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <FileCode className="w-3.5 h-3.5" />
-              API Endpoints & Guards
-            </button>
-            <button
-              onClick={() => setActiveTab('devops')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${activeTab === 'devops' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              Docker & Tests (19 Passing)
-            </button>
-          </div>
+          {/* Action Feedback alerts */}
+          {workspaceActionSuccess && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-800 text-emerald-200 text-xs flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                {workspaceActionSuccess}
+              </span>
+              <button onClick={() => setWorkspaceActionSuccess(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+          )}
+          {workspaceActionError && (
+            <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-800 text-red-200 text-xs flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                {workspaceActionError}
+              </span>
+              <button onClick={() => setWorkspaceActionError(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+          )}
 
-          {/* TAB 1: AUTHENTICATION PLAYGROUND */}
-          {activeTab === 'auth' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left Column: Register / Login Form */}
-              <div className="lg:col-span-6 rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="w-5 h-5 text-indigo-400" />
-                    <h2 className="text-base font-bold text-white tracking-tight">
-                      {authMode === 'register' ? 'Register Account' : 'Sign In'}
-                    </h2>
+          {/* TAB 1: WORKSPACES & PROJECTS DASHBOARD */}
+          {activeTab === 'workspaces' && (
+            <div className="space-y-6">
+              {!currentUser ? (
+                <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-4">
+                  <Lock className="w-10 h-10 text-indigo-400 mx-auto" />
+                  <h3 className="text-base font-bold text-white">Authentication Required</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Sign in or register an account to create workspaces, manage projects, and test Role-Based Access Control.
+                  </p>
+                  <button
+                    onClick={() => setActiveTab('auth')}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition inline-flex items-center gap-2"
+                  >
+                    Open Auth Playground
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Workspace Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <Briefcase className="w-5 h-5 text-indigo-400" />
+                      <div>
+                        <div className="text-xs text-slate-400">Current Workspace:</div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                          {selectedWorkspace ? selectedWorkspace.name : 'No workspace selected'}
+                          {workspaceRole && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              {workspaceRole}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {workspaces.length > 1 && (
+                        <select
+                          value={selectedWorkspace?.id || ''}
+                          onChange={(e) => {
+                            const found = workspaces.find((w) => w.id === e.target.value);
+                            if (found) selectWorkspace(found);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                        >
+                          {workspaces.map((w) => (
+                            <option key={w.id} value={w.id}>
+                              {w.name} ({w.slug})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      <button
+                        onClick={() => setShowCreateWsModal(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium border border-slate-700 transition"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> New Workspace
+                      </button>
+
+                      {selectedWorkspace && (workspaceRole === 'OWNER' || workspaceRole === 'ADMIN') && (
+                        <button
+                          onClick={() => {
+                            setInviteTarget('workspace');
+                            setShowInviteModal(true);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" /> Invite Member
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+
+                  {/* Projects in Workspace Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FolderTree className="w-5 h-5 text-indigo-400" />
+                        <h2 className="text-base font-bold text-white tracking-tight">
+                          Projects in {selectedWorkspace?.name || 'Workspace'}
+                        </h2>
+                      </div>
+
+                      {selectedWorkspace && (
+                        <button
+                          onClick={() => setShowCreateProjectModal(true)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Create Project
+                        </button>
+                      )}
+                    </div>
+
+                    {projects.length === 0 ? (
+                      <div className="p-8 rounded-xl bg-slate-900/50 border border-dashed border-slate-800 text-center space-y-3">
+                        <FolderTree className="w-8 h-8 text-slate-600 mx-auto" />
+                        <div className="text-xs text-slate-300 font-medium">No projects created yet in this workspace</div>
+                        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                          Projects organize tasks, sprints, and team assignments under this workspace.
+                        </p>
+                        <button
+                          onClick={() => setShowCreateProjectModal(true)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Create First Project
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {projects.map((project) => (
+                          <div
+                            key={project.id}
+                            className={`p-4 rounded-xl bg-slate-900 border transition cursor-pointer space-y-3 ${selectedProject?.id === project.id ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' : 'border-slate-800 hover:border-slate-700'}`}
+                            onClick={() => selectProject(project)}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                {project.key}
+                              </span>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                  project.status === 'ACTIVE'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                    : project.status === 'PLANNING'
+                                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                    : 'bg-slate-800 text-slate-400'
+                                }`}
+                              >
+                                {project.status}
+                              </span>
+                            </div>
+
+                            <div>
+                              <h3 className="font-bold text-white text-sm">{project.name}</h3>
+                              {project.description && (
+                                <p className="text-xs text-slate-400 line-clamp-2 mt-1">{project.description}</p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-800/80">
+                              <span>Created: {new Date(project.createdAt).toLocaleDateString()}</span>
+                              {(workspaceRole === 'OWNER' || project.ownerId === currentUser.id) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteProject(project.id);
+                                  }}
+                                  className="text-slate-500 hover:text-red-400 p-1"
+                                  title="Delete project (Owner only)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Members & RBAC Table */}
+                  <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-5 h-5 text-indigo-400" />
+                        <h3 className="text-sm font-bold text-white">Workspace Members & Roles</h3>
+                      </div>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {workspaceMembers.length} Active Member{workspaceMembers.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-950/50">
+                          <tr>
+                            <th className="py-2.5 px-3 rounded-l-lg">User</th>
+                            <th className="py-2.5 px-3">Email</th>
+                            <th className="py-2.5 px-3">Role</th>
+                            <th className="py-2.5 px-3 rounded-r-lg">Joined</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 font-sans">
+                          {workspaceMembers.map((m) => (
+                            <tr key={m.id} className="hover:bg-slate-800/20">
+                              <td className="py-2.5 px-3 font-medium text-white flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center font-bold text-[10px] text-indigo-300">
+                                  {m.user.name.charAt(0)}
+                                </div>
+                                {m.user.name} {m.userId === currentUser.id && '(You)'}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px]">{m.user.email}</td>
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                    m.role === 'OWNER'
+                                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                      : m.role === 'ADMIN'
+                                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  {m.role === 'OWNER' && <Crown className="w-3 h-3 text-amber-400" />}
+                                  {m.role}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                                {new Date(m.joinedAt).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: RBAC MATRIX SPECIFICATION */}
+          {activeTab === 'rbac' && (
+            <div className="space-y-6">
+              <div className="rounded-xl bg-slate-900 border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-indigo-400" />
+                  <h2 className="text-base font-bold text-white tracking-tight">
+                    ProjectFlow RBAC Permission Matrix (Enforced on Backend)
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Every API endpoint verifies permissions on the server using <code>requireWorkspaceRole()</code> and <code>requireProjectRole()</code> middleware. Frontend buttons reflect these rules, but unauthorized HTTP requests are rejected with <code>403 Forbidden</code> or <code>404 Not Found</code> (to prevent IDOR leaks).
+                </p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border border-slate-800 rounded-lg">
+                    <thead className="bg-slate-950 text-slate-400 text-[11px] uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border-b border-slate-800">Capability / Operation</th>
+                        <th className="p-3 border-b border-slate-800 text-center">OWNER</th>
+                        <th className="p-3 border-b border-slate-800 text-center">ADMIN</th>
+                        <th className="p-3 border-b border-slate-800 text-center">MEMBER</th>
+                        <th className="p-3 border-b border-slate-800 text-center">VIEWER</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-slate-300 font-sans">
+                      <tr>
+                        <td className="p-3 font-medium text-white">View Workspace & Projects</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-medium text-white">Create Projects in Workspace</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-red-400">✕</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-medium text-white">Update Project Name / Status</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-red-400">✕ (403)</td>
+                        <td className="p-3 text-center text-red-400">✕ (403)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-medium text-white">Invite Members to Workspace</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓ (All Roles)</td>
+                        <td className="p-3 text-center text-blue-400 font-medium">✓ (Member/Viewer)</td>
+                        <td className="p-3 text-center text-red-400">✕</td>
+                        <td className="p-3 text-center text-red-400">✕</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-medium text-white">Change Roles & Remove Members</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-blue-400 font-medium">✓ (Non-Owners)</td>
+                        <td className="p-3 text-center text-red-400">✕</td>
+                        <td className="p-3 text-center text-red-400">✕</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-medium text-white">Delete Project / Workspace</td>
+                        <td className="p-3 text-center text-emerald-400 font-bold">✓</td>
+                        <td className="p-3 text-center text-red-400">✕ (403)</td>
+                        <td className="p-3 text-center text-red-400">✕ (403)</td>
+                        <td className="p-3 text-center text-red-400">✕ (403)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: AUTH & SESSIONS (Milestone 2) */}
+          {activeTab === 'auth' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="rounded-xl bg-slate-900 border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-white text-sm">
+                    {authMode === 'register' ? 'Register New User' : 'Sign In User'}
+                  </h3>
+                  <div className="flex gap-1 text-xs">
                     <button
-                      onClick={() => { setAuthMode('register'); setAuthError(null); setAuthSuccessMsg(null); }}
-                      className={`px-3 py-1 rounded font-medium transition ${authMode === 'register' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      Register
-                    </button>
-                    <button
-                      onClick={() => { setAuthMode('login'); setAuthError(null); setAuthSuccessMsg(null); }}
-                      className={`px-3 py-1 rounded font-medium transition ${authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                      onClick={() => setAuthMode('login')}
+                      className={`px-2.5 py-1 rounded ${authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
                     >
                       Login
+                    </button>
+                    <button
+                      onClick={() => setAuthMode('register')}
+                      className={`px-2.5 py-1 rounded ${authMode === 'register' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
+                    >
+                      Register
                     </button>
                   </div>
                 </div>
 
                 {authSuccessMsg && (
-                  <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-800/80 text-emerald-200 text-xs flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>{authSuccessMsg}</span>
+                  <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-800 text-emerald-200 text-xs">
+                    {authSuccessMsg}
                   </div>
                 )}
-
                 {authError && (
-                  <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{authError}</span>
+                  <div className="p-3 rounded-lg bg-red-950/40 border border-red-800 text-red-200 text-xs">
+                    {authError}
                   </div>
                 )}
 
-                <form onSubmit={authMode === 'register' ? handleRegister : handleLogin} className="space-y-4 text-xs">
+                <form onSubmit={authMode === 'register' ? handleRegister : handleLogin} className="space-y-3 text-xs">
                   {authMode === 'register' && (
-                    <div className="space-y-1.5">
-                      <label className="text-slate-300 font-medium flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-slate-400" /> Full Name
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-slate-300">Full Name</label>
                       <input
                         type="text"
                         required
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
-                        placeholder="e.g. Sarah Jenkins"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 font-sans"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
                       />
                     </div>
                   )}
 
-                  <div className="space-y-1.5">
-                    <label className="text-slate-300 font-medium flex items-center gap-1.5">
-                      <Mail className="w-3.5 h-3.5 text-slate-400" /> Email Address (Normalized)
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-slate-300">Email Address</label>
                     <input
                       type="email"
                       required
                       value={formEmail}
                       onChange={(e) => setFormEmail(e.target.value)}
-                      placeholder="e.g. sarah.architect@projectflow.dev"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 font-sans"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
                     />
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-slate-300 font-medium flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5 text-slate-400" /> Password (Bcrypt Salt 12)
-                      </label>
-                      <span className="text-[10px] text-slate-500">Min 8 chars, 1 letter, 1 number</span>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        required
-                        value={formPassword}
-                        onChange={(e) => setFormPassword(e.target.value)}
-                        placeholder="••••••••••••"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500 font-sans pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-slate-300">Password</label>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={formPassword}
+                      onChange={(e) => setFormPassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                    />
                   </div>
 
                   <button
                     type="submit"
                     disabled={authSubmitting}
-                    className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs tracking-wide shadow-lg shadow-indigo-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition"
                   >
-                    {authSubmitting ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" />
-                        {authMode === 'register' ? 'Create Account & Issue Token' : 'Sign In & Authenticate'}
-                      </>
-                    )}
+                    {authSubmitting ? 'Authenticating...' : authMode === 'register' ? 'Register Account' : 'Sign In'}
                   </button>
                 </form>
-
-                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1 leading-relaxed">
-                  <div className="flex items-center gap-1.5 text-slate-300 font-medium">
-                    <Shield className="w-3.5 h-3.5 text-indigo-400" /> Security Guarantees:
-                  </div>
-                  <div>• Passwords hashed with 12 bcrypt salt rounds before database persistence.</div>
-                  <div>• Password hashes and secrets are strictly excluded from HTTP response payloads and logs.</div>
-                  <div>• Email normalized (lowercase and trimmed) with uniqueness constraint enforced.</div>
-                </div>
               </div>
 
-              {/* Right Column: Protected Endpoint & Session Inspector */}
-              <div className="lg:col-span-6 space-y-6">
-                {/* Active Session Card */}
-                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Fingerprint className="w-5 h-5 text-indigo-400" />
-                      <h2 className="text-base font-bold text-white tracking-tight">Active JWT Session Inspector</h2>
+              {/* Active Session & Diagnostics */}
+              <div className="rounded-xl bg-slate-900 border border-slate-800 p-6 space-y-4">
+                <h3 className="font-bold text-white text-sm">Active Session Inspector</h3>
+                {currentUser && token ? (
+                  <div className="space-y-3 text-xs">
+                    <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1 font-mono text-[11px]">
+                      <div><strong>ID:</strong> {currentUser.id}</div>
+                      <div><strong>Name:</strong> {currentUser.name}</div>
+                      <div><strong>Email:</strong> {currentUser.email}</div>
                     </div>
-                    {token && (
-                      <button
-                        onClick={handleLogout}
-                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition"
-                      >
-                        <LogOut className="w-3 h-3" /> Invalidate Token (Logout)
-                      </button>
-                    )}
-                  </div>
-
-                  {currentUser && token ? (
-                    <div className="space-y-3 text-xs">
-                      <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Authenticated User:</span>
-                          <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                            <UserCheck className="w-3.5 h-3.5" /> Verified
-                          </span>
-                        </div>
-                        <div className="font-mono text-slate-300">
-                          <div><strong>ID:</strong> {currentUser.id}</div>
-                          <div><strong>Name:</strong> {currentUser.name}</div>
-                          <div><strong>Email:</strong> {currentUser.email}</div>
-                          <div><strong>Joined:</strong> {currentUser.createdAt}</div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <span className="text-slate-400 font-medium">JWT Bearer Token (Stored in Session):</span>
-                        <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[10px] text-indigo-300 break-all max-h-20 overflow-y-auto">
-                          {token}
-                        </div>
+                    <div className="space-y-1">
+                      <span className="text-slate-400">JWT Token (Bearer):</span>
+                      <div className="p-2.5 rounded bg-slate-950 border border-slate-800 font-mono text-[10px] text-indigo-300 break-all max-h-20 overflow-y-auto">
+                        {token}
                       </div>
                     </div>
-                  ) : (
-                    <div className="p-6 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-center space-y-2">
-                      <Lock className="w-8 h-8 text-slate-600 mx-auto" />
-                      <div className="text-xs font-medium text-slate-300">No Active Session</div>
-                      <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                        Register an account or sign in on the left to receive a signed JWT access token and inspect protected route behavior.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Guard Verification Sandbox */}
-                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-5 h-5 text-indigo-400" />
-                      <h3 className="text-sm font-bold text-white tracking-tight">Test Protected Route Guard: <code>GET /api/v1/auth/me</code></h3>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Test how the Express <code>authenticateToken</code> middleware responds to valid tokens, tampered tokens, or missing credentials:
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
-                      onClick={() => testProtectedRoute()}
-                      disabled={protectedTesting}
-                      className="py-2 px-3 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs font-medium transition"
+                      onClick={handleLogout}
+                      className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 text-xs transition inline-flex items-center gap-1.5"
                     >
-                      1. Test Valid Token
-                    </button>
-                    <button
-                      onClick={() => testProtectedRoute('invalid_tampered_token_xyz')}
-                      disabled={protectedTesting}
-                      className="py-2 px-3 rounded-lg bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-medium transition"
-                    >
-                      2. Test Tampered Token
-                    </button>
-                    <button
-                      onClick={() => testProtectedRoute(null)}
-                      disabled={protectedTesting}
-                      className="py-2 px-3 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/30 text-xs font-medium transition"
-                    >
-                      3. Test No Token (401)
+                      <LogOut className="w-3.5 h-3.5" /> Sign Out & Invalidate Token
                     </button>
                   </div>
-
-                  {protectedTesting && (
-                    <div className="text-xs text-slate-400 flex items-center gap-2 py-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                      Dispatching request to /api/v1/auth/me...
-                    </div>
-                  )}
-
-                  {protectedError && (
-                    <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/80 text-red-300 text-xs font-mono">
-                      {protectedError}
-                    </div>
-                  )}
-
-                  {protectedData && (
-                    <pre className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto">
-                      {protectedData}
-                    </pre>
-                  )}
-                </div>
+                ) : (
+                  <div className="text-xs text-slate-500">No active session. Please sign in or register.</div>
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 2: SYSTEM ARCHITECTURE & REPO LAYOUT */}
+          {/* TAB 4: ARCHITECTURE & DEVOPS */}
           {activeTab === 'architecture' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4">
-                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
-                  <FolderTree className="w-4 h-4" />
-                  Clean Monorepo-Style Directory Layout
-                </div>
-                <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800/80 font-mono text-xs text-slate-300 leading-relaxed overflow-x-auto">
-{`projectflow/
-├── apps/
-│   ├── web/src/              # React 19 SPA, Tailwind CSS, Lucide icons
-│   │   ├── App.tsx           # Dashboard shell & telemetry
-│   │   └── main.tsx          # Client entry point
-│   └── api/src/              # Node.js + Express backend
-│       ├── config/           # Zod-validated environment config
-│       ├── controllers/      # Route handlers (auth, health)
-│       ├── middleware/       # JWT auth guard, Zod validator, Logger, Error Handler
-│       ├── routes/v1/        # Versioned routes (/api/v1/auth, /api/v1/health)
-│       ├── services/         # AuthService, PasswordService, TokenService
-│       ├── repositories/     # IUserRepository, PrismaUserRepository, MemoryUserRepository
-│       ├── utils/            # AppError, ConflictError, UnauthorizedError
-│       └── app.ts            # Configured Express application
-├── packages/
-│   └── shared/src/           # Types, Zod Schemas, Domain models
-│       ├── types.ts          # UserSummary, RegisterRequest, AuthResponse, etc.
-│       └── schemas.ts        # RegisterSchema, LoginSchema, Pagination
-├── prisma/
-│   └── schema.prisma         # PostgreSQL schema & relations (User with tokenVersion)
-├── tests/
-│   ├── api/auth.test.ts      # Supertest auth integration tests (13 tests)
-│   ├── api/health.test.ts    # Supertest health tests (2 tests)
-│   └── unit/validation.test.ts # Zod schema unit tests (4 tests)
-├── .github/workflows/ci.yml  # Automated GitHub Actions workflow
-├── docker-compose.yml        # PostgreSQL 16 Alpine container
-├── Dockerfile                # Multi-stage production container
-└── server.ts                 # Full-stack dev & prod Express server`}
-                </pre>
-              </div>
-
-              <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4">
-                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
-                  <Shield className="w-4 h-4" />
-                  Milestone 2 Security Architecture
-                </div>
-                <div className="space-y-3 text-xs text-slate-300">
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">
-                    <div className="font-semibold text-white flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      1. Cryptographic Password Security
-                    </div>
-                    <p className="text-slate-400 leading-relaxed">
-                      Passwords hashed using <code className="text-indigo-300">bcryptjs</code> with 12 salt rounds. Plaintext passwords never reach storage, and password hashes are never serialized in API responses or logs.
-                    </p>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">
-                    <div className="font-semibold text-white flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      2. JWT Tokens & Instant Revocation
-                    </div>
-                    <p className="text-slate-400 leading-relaxed">
-                      Stateless JWT tokens with customizable expiration (<code className="text-indigo-300">JWT_EXPIRES_IN=7d</code>). Token invalidation on logout is supported via both an in-memory blocklist and database-level <code className="text-indigo-300">tokenVersion</code> increments.
-                    </p>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1">
-                    <div className="font-semibold text-white flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      3. Safe Error Handling & No Enumeration
-                    </div>
-                    <p className="text-slate-400 leading-relaxed">
-                      Invalid password and non-existent email return identical 401 Unauthorized messages to prevent user enumeration attacks.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: PRISMA SCHEMA */}
-          {activeTab === 'schema' && (
-            <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
-                  <Database className="w-4 h-4" />
-                  Prisma User Entity (<code className="text-slate-300">prisma/schema.prisma</code>)
-                </div>
-                <span className="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                  PostgreSQL Target • Unique Email Constraint • Token Version
-                </span>
-              </div>
-
-              <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-indigo-300 overflow-x-auto leading-relaxed">
-{`model User {
-  id           String          @id @default(uuid())
-  email        String          @unique
-  passwordHash String
-  name         String
-  avatarUrl    String?
-  tokenVersion Int             @default(0)   // Incremented on logout for instant invalidation
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-
-  // Relationships
-  ownedProjects   Project[]       @relation("ProjectOwner")
-  memberships     ProjectMember[]
-  createdTasks    Task[]          @relation("TaskCreator")
-  assignedTasks   Task[]          @relation("TaskAssignee")
-  activityLogs    ActivityLog[]
-
-  @@map("users")
-}`}
-              </pre>
-            </div>
-          )}
-
-          {/* TAB 4: API CONTRACTS */}
-          {activeTab === 'endpoints' && (
-            <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
-                  <FileCode className="w-4 h-4" />
-                  Authentication API Contract (<code className="text-slate-300">/api/v1/auth/*</code>)
-                </div>
-                <span className="text-xs text-slate-400">All routes verified with Supertest</span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold text-[11px]">POST</span>
-                    <span className="text-slate-200">/api/v1/auth/register</span>
-                  </div>
-                  <span className="text-emerald-400 font-sans text-xs flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 201 Created • Issues Token • Hashes Password
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold text-[11px]">POST</span>
-                    <span className="text-slate-200">/api/v1/auth/login</span>
-                  </div>
-                  <span className="text-emerald-400 font-sans text-xs flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 200 OK • Returns JWT • Safe 401 on Mismatch
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px]">GET</span>
-                    <span className="text-slate-200">/api/v1/auth/me</span>
-                  </div>
-                  <span className="text-emerald-400 font-sans text-xs flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Protected (Bearer Guard) • Returns User Profile
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[11px]">POST</span>
-                    <span className="text-slate-200">/api/v1/auth/logout</span>
-                  </div>
-                  <span className="text-emerald-400 font-sans text-xs flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Protected • Invalidates Session & Token
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: DEVOPS & TESTS */}
-          {activeTab === 'devops' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-3">
                 <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
+                  <FolderTree className="w-4 h-4" />
+                  Milestone 3 Codebase Architecture
+                </div>
+                <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 overflow-x-auto leading-relaxed">
+{`projectflow/
+├── apps/
+│   ├── web/src/              # React 19 Frontend SPA
+│   └── api/src/
+│       ├── controllers/      # Workspace & Project controllers
+│       ├── middleware/       # requireWorkspaceRole, requireProjectRole (RBAC)
+│       ├── routes/v1/        # /workspaces, /projects, /auth, /health
+│       ├── services/         # WorkspaceService, ProjectService, AuthService
+│       └── repositories/     # WorkspaceRepo, ProjectRepo, UserRepo
+├── packages/
+│   └── shared/src/           # Types & Zod Schemas (Workspaces, Projects, Roles)
+├── prisma/
+│   └── schema.prisma         # Workspace, WorkspaceMember, Project, ProjectMember
+└── tests/
+    ├── api/workspaces.test.ts # 10 tests (CRUD, Roles, Members)
+    ├── api/projects.test.ts   # 10 tests (CRUD, Anti-IDOR, Roles)
+    └── api/auth.test.ts       # 13 tests (JWT, Bcrypt, Invalidation)`}
+                </pre>
+              </div>
+
+              <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-3">
+                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
                   <GitBranch className="w-4 h-4" />
-                  Automated Test Coverage (19 Tests Passing)
+                  Automated Test Coverage (39 Tests Passing)
                 </div>
                 <div className="space-y-2 text-xs font-mono text-slate-300">
+                  <div className="p-2.5 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <span>tests/api/workspaces.test.ts</span>
+                    <span className="text-emerald-400">10 / 10 Passed</span>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <span>tests/api/projects.test.ts</span>
+                    <span className="text-emerald-400">10 / 10 Passed</span>
+                  </div>
                   <div className="p-2.5 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
                     <span>tests/api/auth.test.ts</span>
                     <span className="text-emerald-400">13 / 13 Passed</span>
@@ -888,24 +1106,197 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-3">
-                <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
-                  <Cpu className="w-4 h-4" />
-                  Local Docker & PostgreSQL Setup
-                </div>
-                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2 text-xs font-mono text-slate-300">
-                  <div className="text-slate-400"># Start local PostgreSQL:</div>
-                  <div className="text-emerald-400">docker compose up -d</div>
-                  <div className="text-slate-400 mt-2"># Run migrations & tests:</div>
-                  <div className="text-indigo-400">npx prisma migrate dev --name add_auth</div>
-                  <div className="text-indigo-400">npm run test</div>
-                </div>
-              </div>
             </div>
           )}
         </main>
       </div>
+
+      {/* MODAL: Create Workspace */}
+      {showCreateWsModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="font-bold text-white text-base">Create New Workspace</h3>
+            <form onSubmit={handleCreateWorkspace} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Workspace Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Acme Corporation"
+                  value={newWsName}
+                  onChange={(e) => setNewWsName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Slug (Optional URL identifier)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. acme-corp"
+                  value={newWsSlug}
+                  onChange={(e) => setNewWsSlug(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Workspace description..."
+                  value={newWsDesc}
+                  onChange={(e) => setNewWsDesc(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateWsModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold"
+                >
+                  Create Workspace
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Create Project */}
+      {showCreateProjectModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="font-bold text-white text-base">Create Project in {selectedWorkspace?.name}</h3>
+            <form onSubmit={handleCreateProject} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Project Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Mobile Banking App"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Project Key * (2-10 letters, e.g. MBA, DEV)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={10}
+                  placeholder="MBA"
+                  value={newProjectKey}
+                  onChange={(e) => setNewProjectKey(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Status</label>
+                <select
+                  value={newProjectStatus}
+                  onChange={(e) => setNewProjectStatus(e.target.value as ProjectStatus)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                >
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="PLANNING">PLANNING</option>
+                  <option value="ON_HOLD">ON_HOLD</option>
+                  <option value="COMPLETED">COMPLETED</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Project goals and scope..."
+                  value={newProjectDesc}
+                  onChange={(e) => setNewProjectDesc(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateProjectModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold"
+                >
+                  Create Project
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Invite Member */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="font-bold text-white text-base">Invite Member</h3>
+            <form onSubmit={handleInviteMember} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Registered User Email *</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="user@projectflow.dev"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Assigned Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as Role)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                >
+                  {workspaceRole === 'OWNER' && <option value="ADMIN">ADMIN (Manage projects and members)</option>}
+                  <option value="MEMBER">MEMBER (Create projects, view workspace)</option>
+                  <option value="VIEWER">VIEWER (Read-only access)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold"
+                >
+                  Send Invitation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

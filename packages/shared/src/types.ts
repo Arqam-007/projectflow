@@ -37,14 +37,87 @@ export interface JwtAuthPayload {
   exp?: number;
 }
 
+export type ProjectStatus = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'ARCHIVED';
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  ownerId: string;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    projects: number;
+    members: number;
+  };
+}
+
+export interface WorkspaceMemberSummary {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  role: Role;
+  joinedAt: string;
+  user: UserSummary;
+}
+
 export interface ProjectSummary {
   id: string;
   name: string;
   key: string;
   description?: string | null;
+  status: ProjectStatus;
+  workspaceId: string;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
+  _count?: {
+    members: number;
+    tasks: number;
+  };
+}
+
+export interface ProjectMemberSummary {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: Role;
+  joinedAt: string;
+  user: UserSummary;
+}
+
+export interface CreateWorkspaceRequest {
+  name: string;
+  slug?: string;
+  description?: string;
+}
+
+export interface UpdateWorkspaceRequest {
+  name?: string;
+  description?: string;
+}
+
+export interface AddMemberRequest {
+  email: string;
+  role: Role;
+}
+
+export interface UpdateRoleRequest {
+  role: Role;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  key: string;
+  description?: string;
+  status?: ProjectStatus;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
+  status?: ProjectStatus;
 }
 
 export interface TaskSummary {

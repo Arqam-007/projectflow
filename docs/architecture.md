@@ -12,22 +12,24 @@ projectflow/
 │   │   └── main.tsx          # Client entry point
 │   └── api/src/              # Express API Server (Node.js + TypeScript)
 │       ├── config/           # Zod-validated environment config (JWT_SECRET, PORT)
-│       ├── controllers/      # Route controllers (auth, health)
-│       ├── middleware/       # JWT auth guard, error handling, validation, logging
-│       ├── routes/v1/        # Versioned route registry (/api/v1/auth, /api/v1/health)
-│       ├── services/         # AuthService, PasswordService, TokenService, HealthService
-│       ├── repositories/     # IUserRepository, PrismaUserRepository, MemoryUserRepository
-│       ├── utils/            # Domain errors (AppError, ConflictError, UnauthorizedError)
+│       ├── controllers/      # Route controllers (auth, health, workspaces, projects)
+│       ├── middleware/       # JWT auth guard, RBAC guards, error handling, validation, logging
+│       ├── routes/v1/        # Versioned route registry (/api/v1/{auth,health,workspaces,projects})
+│       ├── services/         # WorkspaceService, ProjectService, AuthService, TokenService
+│       ├── repositories/     # WorkspaceRepo, ProjectRepo, UserRepo (Prisma & Memory adapters)
+│       ├── utils/            # Domain errors (AppError, ConflictError, UnauthorizedError, ForbiddenError)
 │       └── app.ts            # Express application setup
 ├── packages/
 │   └── shared/src/           # Shared types and Zod schemas
-│       ├── types.ts          # Core domain models (User, RegisterRequest, AuthResponse)
-│       └── schemas.ts        # Zod validation schemas (RegisterSchema, LoginSchema)
+│       ├── types.ts          # Core domain models (Workspace, Project, User, Role, Status)
+│       └── schemas.ts        # Zod validation schemas (Workspaces, Projects, Members, Auth)
 ├── prisma/
-│   └── schema.prisma         # PostgreSQL schema definition with Prisma (User + tokenVersion)
+│   └── schema.prisma         # PostgreSQL schema definition with Prisma
 ├── tests/
-│   ├── api/auth.test.ts      # Supertest auth integration tests (13 tests)
-│   ├── api/health.test.ts    # Supertest health tests (2 tests)
+│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
+│   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
+│   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)
+│   ├── api/health.test.ts     # Supertest health tests (2 tests)
 │   └── unit/validation.test.ts # Zod schema unit tests (4 tests)
 ├── .github/workflows/
 │   └── ci.yml                # GitHub Actions automated lint, test, build
@@ -37,9 +39,9 @@ projectflow/
 └── README.md                 # Setup & portfolio guide
 ```
 
-## 2. Authentication & Authorization Architecture (Milestone 2)
+## 2. Authentication & Authorization Architecture
 
-ProjectFlow implements stateless JSON Web Token (JWT) authentication coupled with token version revocation:
+ProjectFlow implements stateless JSON Web Token (JWT) authentication coupled with token version revocation and hierarchical Role-Based Access Control (RBAC):
 
 ```
 [Client SPA / API Client]
@@ -51,31 +53,58 @@ ProjectFlow implements stateless JSON Web Token (JWT) authentication coupled wit
         ├── 2. POST /api/v1/auth/login (email, password)
         │      └── Checked against bcrypt hash -> JWT issued -> Returns { user, accessToken }
         │
-        ├── 3. GET /api/v1/auth/me (Authorization: Bearer <token>)
-        │      └── authenticateToken middleware verifies JWT signature & expiry
-        │      └── Verifies payload.tokenVersion === user.tokenVersion in DB
-        │      └── Injects req.user -> Returns authenticated user profile
+        ├── 3. GET /api/v1/workspaces/:workspaceId (Authorization: Bearer <token>)
+        │      └── authenticateToken middleware verifies JWT
+        │      └── requireWorkspaceRole middleware checks workspace membership & role
+        │      └── Rejects unauthorized users with 404 (prevents IDOR leakage)
         │
-        └── 4. POST /api/v1/auth/logout (Authorization: Bearer <token>)
-               └── Adds token to in-memory revocation list
-               └── Increments user.tokenVersion in database -> Instantly invalidates all prior tokens
+        └── 4. PATCH / DELETE /api/v1/projects/:projectId
+               └── requireProjectRole(['ADMIN', 'OWNER']) enforces role permissions
 ```
 
-### Security Guarantees
-1. **Password Hashing**: Passwords hashed with `bcryptjs` using 12 salt rounds before database persistence.
-2. **Zero Credential Leakage**: Password hashes and secret keys are excluded from API response serializations and structured logs.
-3. **No User Enumeration**: Login failures due to invalid passwords or non-existent emails return identical `401 Unauthorized ("Invalid email or password")` responses.
-4. **Normalized Identifiers**: Emails are normalized (`trim().toLowerCase()`) and enforced as unique in PostgreSQL.
-5. **Token Revocation**: Tokens can be invalidated immediately upon logout by incrementing `tokenVersion` on the User record.
+### Role-Based Access Control (RBAC) Matrix
 
-## 3. API Endpoints
+| Operation | OWNER | ADMIN | MEMBER | VIEWER |
+|---|:---:|:---:|:---:|:---:|
+| View Workspace & Projects | ✓ | ✓ | ✓ | ✓ |
+| Create Projects in Workspace | ✓ | ✓ | ✓ | ✕ |
+| Update Project Details & Status | ✓ | ✓ | ✕ (403) | ✕ (403) |
+| Invite Members to Workspace / Project | ✓ (All roles) | ✓ (Member / Viewer) | ✕ (403) | ✕ (403) |
+| Update Member Roles | ✓ | ✓ (Non-Owners) | ✕ (403) | ✕ (403) |
+| Remove Members | ✓ | ✓ (Non-Owners) | ✕ (Can leave self) | ✕ |
+| Delete Project / Workspace | ✓ | ✕ (403) | ✕ (403) | ✕ (403) |
+
+### Anti-IDOR & Multi-Tenant Isolation
+- Insecure Direct Object References (IDOR) are prevented by requiring both valid JWT authentication and explicit membership in the target workspace or project.
+- Attempts to query or modify resources belonging to another workspace return `404 Not Found` rather than `403 Forbidden` to prevent leaking whether private resource IDs exist.
+- Ownership protection guarantees that a workspace or project can never be left without an owner (demoting or removing the sole owner returns `400 Bad Request`).
+
+## 3. REST API Endpoints (Milestones 1–3)
 
 All API routes are prefixed under `/api/v1/`.
 
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/health` | Public | Telemetry, uptime, and database connection state |
-| `POST` | `/api/v1/auth/register` | Public | Registers new user, hashes password, returns JWT token (201) |
-| `POST` | `/api/v1/auth/login` | Public | Authenticates credentials, returns JWT token (200) |
-| `POST` | `/api/v1/auth/logout` | Authenticated | Invalidates token and increments `tokenVersion` (200) |
-| `GET` | `/api/v1/auth/me` | Authenticated | Returns authenticated user profile (200) |
+| Method | Endpoint | Authorization | Description | Status Code |
+|---|---|---|---|---|
+| `GET` | `/api/v1/health` | Public | Telemetry, uptime, and database connection state | `200` |
+| `POST` | `/api/v1/auth/register` | Public | Registers user, hashes password, returns JWT token | `201` |
+| `POST` | `/api/v1/auth/login` | Public | Authenticates credentials, returns JWT token | `200` |
+| `POST` | `/api/v1/auth/logout` | Authenticated | Revokes token and increments `tokenVersion` | `200` |
+| `GET` | `/api/v1/auth/me` | Authenticated | Returns current authenticated user profile | `200` |
+| `POST` | `/api/v1/workspaces` | Authenticated | Creates a new workspace (caller assigned as `OWNER`) | `201` |
+| `GET` | `/api/v1/workspaces` | Authenticated | Lists workspaces accessible to current user | `200` |
+| `GET` | `/api/v1/workspaces/:workspaceId` | Member+ | Retrieves workspace details and current user role | `200` / `404` |
+| `PATCH` | `/api/v1/workspaces/:workspaceId` | Admin+ | Updates workspace name and description | `200` / `403` |
+| `DELETE` | `/api/v1/workspaces/:workspaceId` | Owner | Deletes workspace and cascades all projects | `200` / `403` |
+| `GET` | `/api/v1/workspaces/:workspaceId/members` | Member+ | Lists members and roles in workspace | `200` |
+| `POST` | `/api/v1/workspaces/:workspaceId/members` | Admin+ | Adds registered user by email to workspace | `201` / `409` |
+| `PATCH` | `/api/v1/workspaces/:workspaceId/members/:userId` | Admin+ | Updates workspace member role | `200` / `403` |
+| `DELETE` | `/api/v1/workspaces/:workspaceId/members/:userId` | Member+ | Removes member or allows leaving workspace | `200` / `400` |
+| `POST` | `/api/v1/workspaces/:workspaceId/projects` | Member+ | Creates project with unique key in workspace | `201` / `409` |
+| `GET` | `/api/v1/workspaces/:workspaceId/projects` | Member+ | Lists accessible projects in workspace | `200` |
+| `GET` | `/api/v1/projects/:projectId` | Member+ | Retrieves project details and current user role | `200` / `404` |
+| `PATCH` | `/api/v1/projects/:projectId` | Admin+ | Updates project name, description, or status | `200` / `403` |
+| `DELETE` | `/api/v1/projects/:projectId` | Owner | Deletes project and associated tasks | `200` / `403` |
+| `GET` | `/api/v1/projects/:projectId/members` | Member+ | Lists project members and roles | `200` |
+| `POST` | `/api/v1/projects/:projectId/members` | Admin+ | Adds user to project with assigned role | `201` / `409` |
+| `PATCH` | `/api/v1/projects/:projectId/members/:userId` | Admin+ | Updates project member role | `200` / `403` |
+| `DELETE` | `/api/v1/projects/:projectId/members/:userId` | Member+ | Removes member from project | `200` / `400` |
