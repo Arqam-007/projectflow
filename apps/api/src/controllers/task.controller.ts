@@ -104,7 +104,9 @@ export async function updateTaskStatusHandler(
     const task = await taskService.updateTaskStatus(
       req.params.taskId,
       payload.status,
-      payload.orderIndex
+      payload.orderIndex,
+      req.user!.id,
+      req.projectRole!
     );
 
     res.status(200).json({

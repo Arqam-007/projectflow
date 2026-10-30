@@ -7,7 +7,7 @@ import { MemoryProjectRepository, setProjectRepository } from '../../apps/api/sr
 import { MemoryTaskRepository, setTaskRepository } from '../../apps/api/src/repositories/task.repository.js';
 import { tokenService } from '../../apps/api/src/services/token.service.js';
 
-describe('Task Management, Priorities, Status Transitions & Assignees Integration Tests', () => {
+describe('Task Management, Concurrency, RBAC & State Machine Integration Tests', () => {
   let userRepo: MemoryUserRepository;
   let workspaceRepo: MemoryWorkspaceRepository;
   let projectRepo: MemoryProjectRepository;
@@ -19,6 +19,8 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
   let adminUser: { id: string; email: string; name: string };
   let memberToken: string;
   let memberUser: { id: string; email: string; name: string };
+  let secondMemberToken: string;
+  let secondMemberUser: { id: string; email: string; name: string };
   let viewerToken: string;
   let viewerUser: { id: string; email: string; name: string };
   let outsiderToken: string;
@@ -39,7 +41,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     setProjectRepository(projectRepo);
     setTaskRepository(taskRepo);
 
-    // 1. Create Workspace & Project Owner
+    // 1. Workspace & Project Owner
     const rawOwner = await userRepo.create({
       email: 'owner@projectflow.dev',
       name: 'Project Owner',
@@ -48,7 +50,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     ownerUser = { id: rawOwner.id, email: rawOwner.email, name: rawOwner.name };
     ownerToken = tokenService.generateToken({ userId: rawOwner.id, email: rawOwner.email, tokenVersion: rawOwner.tokenVersion }).token;
 
-    // 2. Create Admin user
+    // 2. Project Admin
     const rawAdmin = await userRepo.create({
       email: 'admin@projectflow.dev',
       name: 'Project Admin',
@@ -57,7 +59,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     adminUser = { id: rawAdmin.id, email: rawAdmin.email, name: rawAdmin.name };
     adminToken = tokenService.generateToken({ userId: rawAdmin.id, email: rawAdmin.email, tokenVersion: rawAdmin.tokenVersion }).token;
 
-    // 3. Create Member user
+    // 3. Project Member 1
     const rawMember = await userRepo.create({
       email: 'member@projectflow.dev',
       name: 'Project Member',
@@ -66,7 +68,16 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     memberUser = { id: rawMember.id, email: rawMember.email, name: rawMember.name };
     memberToken = tokenService.generateToken({ userId: rawMember.id, email: rawMember.email, tokenVersion: rawMember.tokenVersion }).token;
 
-    // 4. Create Viewer user
+    // 4. Project Member 2 (to test inter-member authorization boundaries)
+    const rawSecondMember = await userRepo.create({
+      email: 'member2@projectflow.dev',
+      name: 'Second Project Member',
+      passwordHash: 'mock-hash',
+    });
+    secondMemberUser = { id: rawSecondMember.id, email: rawSecondMember.email, name: rawSecondMember.name };
+    secondMemberToken = tokenService.generateToken({ userId: rawSecondMember.id, email: rawSecondMember.email, tokenVersion: rawSecondMember.tokenVersion }).token;
+
+    // 5. Project Viewer
     const rawViewer = await userRepo.create({
       email: 'viewer@projectflow.dev',
       name: 'Project Viewer',
@@ -75,7 +86,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     viewerUser = { id: rawViewer.id, email: rawViewer.email, name: rawViewer.name };
     viewerToken = tokenService.generateToken({ userId: rawViewer.id, email: rawViewer.email, tokenVersion: rawViewer.tokenVersion }).token;
 
-    // 5. Create Outsider user
+    // 6. Outsider (Non-member)
     const rawOutsider = await userRepo.create({
       email: 'outsider@projectflow.dev',
       name: 'Outsider User',
@@ -91,7 +102,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       .send({ name: 'Alpha Studio', slug: 'alpha-studio' });
     workspaceId = wsRes.body.data.id;
 
-    // Add admin, member, and viewer to workspace
+    // Add users to workspace
     await request(app)
       .post(`/api/v1/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${ownerToken}`)
@@ -101,6 +112,11 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       .post(`/api/v1/workspaces/${workspaceId}/members`)
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({ email: memberUser.email, role: 'MEMBER' });
+
+    await request(app)
+      .post(`/api/v1/workspaces/${workspaceId}/members`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ email: secondMemberUser.email, role: 'MEMBER' });
 
     await request(app)
       .post(`/api/v1/workspaces/${workspaceId}/members`)
@@ -114,7 +130,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       .send({ name: 'Core Platform', key: 'CORE', description: 'Core application development' });
     projectId = projRes.body.data.id;
 
-    // Add admin, member, and viewer to project
+    // Add members to project
     await request(app)
       .post(`/api/v1/projects/${projectId}/members`)
       .set('Authorization', `Bearer ${ownerToken}`)
@@ -128,14 +144,61 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     await request(app)
       .post(`/api/v1/projects/${projectId}/members`)
       .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ email: secondMemberUser.email, role: 'MEMBER' });
+
+    await request(app)
+      .post(`/api/v1/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${ownerToken}`)
       .send({ email: viewerUser.email, role: 'VIEWER' });
 
-    // Create secondary project for cross-project isolation tests
+    // Create second isolated project
     const secondProjRes = await request(app)
       .post(`/api/v1/workspaces/${workspaceId}/projects`)
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({ name: 'Mobile App', key: 'MOB', description: 'iOS and Android client' });
     secondProjectId = secondProjRes.body.data.id;
+  });
+
+  describe('Task Numbering & Concurrency', () => {
+    it('ensures concurrent task creation generates strictly unique, sequential task keys without collisions', async () => {
+      // Dispatch 8 concurrent task creation requests simultaneously
+      const taskCreationPromises = Array.from({ length: 8 }, (_, i) =>
+        request(app)
+          .post(`/api/v1/projects/${projectId}/tasks`)
+          .set('Authorization', `Bearer ${ownerToken}`)
+          .send({
+            title: `Concurrent Task ${i + 1}`,
+            priority: 'MEDIUM',
+            status: 'TODO',
+          })
+      );
+
+      const responses = await Promise.all(taskCreationPromises);
+
+      // Verify all 8 succeeded with 201 Created
+      for (const res of responses) {
+        expect(res.status).toBe(201);
+        expect(res.body.success).toBe(true);
+      }
+
+      // Collect all task numbers and task keys
+      const taskNumbers = responses.map((r) => r.body.data.taskNumber);
+      const taskKeys = responses.map((r) => r.body.data.taskKey);
+
+      // Assert all numbers and keys are unique
+      const uniqueNumbers = new Set(taskNumbers);
+      const uniqueKeys = new Set(taskKeys);
+
+      expect(uniqueNumbers.size).toBe(8);
+      expect(uniqueKeys.size).toBe(8);
+
+      // Verify the task numbers are 1 through 8
+      const sortedNumbers = [...taskNumbers].sort((a, b) => a - b);
+      expect(sortedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+
+      // Verify keys follow project key prefix
+      expect(taskKeys.every((k) => k.startsWith('CORE-'))).toBe(true);
+    });
   });
 
   describe('Task Creation & Assignment', () => {
@@ -194,7 +257,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(res.body.error.message).toContain('active member of this project');
     });
 
-    it('denies task creation to project VIEWERS', async () => {
+    it('denies task creation to project VIEWERS with 403 Forbidden', async () => {
       const res = await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${viewerToken}`)
@@ -206,7 +269,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(res.body.success).toBe(false);
     });
 
-    it('denies task creation to users outside the project', async () => {
+    it('denies task creation to users outside the project with 404 (Anti-IDOR)', async () => {
       const res = await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${outsiderToken}`)
@@ -230,22 +293,22 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     });
   });
 
-  describe('Task Listing and Filtering', () => {
+  describe('Task Listing, Search & Combined Filters', () => {
     beforeEach(async () => {
       await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Task Alpha', priority: 'LOW', status: 'TODO' });
+        .send({ title: 'Task Alpha Frontend', priority: 'LOW', status: 'TODO' });
 
       await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Task Beta', priority: 'HIGH', status: 'IN_PROGRESS', assigneeId: memberUser.id });
+        .send({ title: 'Task Beta Backend API', priority: 'HIGH', status: 'IN_PROGRESS', assigneeId: memberUser.id });
 
       await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Task Gamma', priority: 'URGENT', status: 'DONE' });
+        .send({ title: 'Task Gamma Database Migration', priority: 'HIGH', status: 'DONE' });
     });
 
     it('lists all tasks for authorized project members and viewers', async () => {
@@ -264,17 +327,16 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(1);
-      expect(res.body.data[0].title).toBe('Task Beta');
+      expect(res.body.data[0].title).toBe('Task Beta Backend API');
     });
 
     it('filters tasks by priority', async () => {
       const res = await request(app)
-        .get(`/api/v1/projects/${projectId}/tasks?priority=URGENT`)
+        .get(`/api/v1/projects/${projectId}/tasks?priority=HIGH`)
         .set('Authorization', `Bearer ${memberToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.data).toHaveLength(1);
-      expect(res.body.data[0].title).toBe('Task Gamma');
+      expect(res.body.data).toHaveLength(2);
     });
 
     it('filters tasks by assigneeId', async () => {
@@ -284,17 +346,17 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(1);
-      expect(res.body.data[0].title).toBe('Task Beta');
+      expect(res.body.data[0].title).toBe('Task Beta Backend API');
     });
 
-    it('searches tasks by title query', async () => {
+    it('applies combined filters (priority + search query)', async () => {
       const res = await request(app)
-        .get(`/api/v1/projects/${projectId}/tasks?search=Alpha`)
+        .get(`/api/v1/projects/${projectId}/tasks?priority=HIGH&search=Backend`)
         .set('Authorization', `Bearer ${memberToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(1);
-      expect(res.body.data[0].title).toBe('Task Alpha');
+      expect(res.body.data[0].title).toBe('Task Beta Backend API');
     });
   });
 
@@ -304,8 +366,8 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     beforeEach(async () => {
       const res = await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
-        .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Lifecycle Task', status: 'TODO', priority: 'MEDIUM' });
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({ title: 'Lifecycle Task', status: 'TODO', priority: 'MEDIUM', assigneeId: memberUser.id });
       taskId = res.body.data.id;
     });
 
@@ -319,8 +381,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(res.body.data.status).toBe('IN_PROGRESS');
     });
 
-    it('permits valid sequence TODO -> IN_PROGRESS -> IN_REVIEW -> DONE', async () => {
-      // 1. Move to IN_PROGRESS
+    it('permits valid sequence TODO -> IN_PROGRESS -> IN_REVIEW -> DONE -> IN_PROGRESS', async () => {
       const step1 = await request(app)
         .patch(`/api/v1/tasks/${taskId}/status`)
         .set('Authorization', `Bearer ${memberToken}`)
@@ -328,7 +389,6 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(step1.status).toBe(200);
       expect(step1.body.data.status).toBe('IN_PROGRESS');
 
-      // 2. Move to IN_REVIEW
       const step2 = await request(app)
         .patch(`/api/v1/tasks/${taskId}/status`)
         .set('Authorization', `Bearer ${memberToken}`)
@@ -336,7 +396,6 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(step2.status).toBe(200);
       expect(step2.body.data.status).toBe('IN_REVIEW');
 
-      // 3. Move to DONE
       const step3 = await request(app)
         .patch(`/api/v1/tasks/${taskId}/status`)
         .set('Authorization', `Bearer ${memberToken}`)
@@ -344,7 +403,6 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
       expect(step3.status).toBe(200);
       expect(step3.body.data.status).toBe('DONE');
 
-      // 4. Move from DONE back to IN_PROGRESS
       const step4 = await request(app)
         .patch(`/api/v1/tasks/${taskId}/status`)
         .set('Authorization', `Bearer ${memberToken}`)
@@ -354,22 +412,31 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     });
 
     it('rejects invalid status transitions (e.g. BACKLOG -> DONE)', async () => {
-      // Create backlog task
       const backlogRes = await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
         .set('Authorization', `Bearer ${ownerToken}`)
         .send({ title: 'Backlog Item', status: 'BACKLOG' });
       const backlogId = backlogRes.body.data.id;
 
-      // Attempt jump directly from BACKLOG to DONE
       const invalidRes = await request(app)
         .patch(`/api/v1/tasks/${backlogId}/status`)
-        .set('Authorization', `Bearer ${memberToken}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
         .send({ status: 'DONE' });
 
       expect(invalidRes.status).toBe(400);
       expect(invalidRes.body.success).toBe(false);
       expect(invalidRes.body.error.message).toContain('Invalid status transition');
+    });
+
+    it('forbids another regular MEMBER from transitioning status of a task they did not create or get assigned to', async () => {
+      // memberUser created taskId; secondMemberUser attempts to change status
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${taskId}/status`)
+        .set('Authorization', `Bearer ${secondMemberToken}`)
+        .send({ status: 'IN_PROGRESS' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toContain('You do not have permission to change the status of this task');
     });
 
     it('rejects status change attempts by VIEWERS', async () => {
@@ -382,47 +449,107 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
     });
   });
 
-  describe('Task Updates & Details', () => {
-    let taskId: string;
+  describe('Task Editing, Reassignment & RBAC Boundaries', () => {
+    let memberTaskId: string;
 
     beforeEach(async () => {
       const res = await request(app)
         .post(`/api/v1/projects/${projectId}/tasks`)
-        .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Original Title', description: 'Original Description', priority: 'LOW' });
-      taskId = res.body.data.id;
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({ title: 'Member Created Task', description: 'Original Description', priority: 'LOW' });
+      memberTaskId = res.body.data.id;
     });
 
     it('fetches task details with creator and project info', async () => {
       const res = await request(app)
-        .get(`/api/v1/tasks/${taskId}`)
+        .get(`/api/v1/tasks/${memberTaskId}`)
         .set('Authorization', `Bearer ${viewerToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.data.id).toBe(taskId);
-      expect(res.body.data.title).toBe('Original Title');
-      expect(res.body.data.creator.email).toBe(ownerUser.email);
+      expect(res.body.data.id).toBe(memberTaskId);
+      expect(res.body.data.title).toBe('Member Created Task');
+      expect(res.body.data.creator.email).toBe(memberUser.email);
     });
 
-    it('updates title, priority, and reassigns to member', async () => {
+    it('allows task creator to edit own task and reassign it to another member', async () => {
       const res = await request(app)
-        .patch(`/api/v1/tasks/${taskId}`)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
         .set('Authorization', `Bearer ${memberToken}`)
         .send({
-          title: 'Updated Title',
+          title: 'Updated Title by Creator',
           priority: 'URGENT',
-          assigneeId: memberUser.id,
+          assigneeId: secondMemberUser.id,
         });
 
       expect(res.status).toBe(200);
-      expect(res.body.data.title).toBe('Updated Title');
+      expect(res.body.data.title).toBe('Updated Title by Creator');
       expect(res.body.data.priority).toBe('URGENT');
-      expect(res.body.data.assigneeId).toBe(memberUser.id);
+      expect(res.body.data.assigneeId).toBe(secondMemberUser.id);
+    });
+
+    it('allows assigned member to edit their assigned task', async () => {
+      // Reassign to secondMember
+      await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({ assigneeId: secondMemberUser.id });
+
+      // secondMember edits the task
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${secondMemberToken}`)
+        .send({ title: 'Updated by Assignee', description: 'Assignee notes added' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.title).toBe('Updated by Assignee');
+    });
+
+    it('forbids an unassigned non-creator MEMBER from editing another member\'s task', async () => {
+      // secondMemberUser attempts to edit memberUser's task
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${secondMemberToken}`)
+        .send({ title: 'Tampered Title' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toContain('You do not have permission to edit this task');
+    });
+
+    it('allows project ADMIN to edit any task in project', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Admin Edited Task' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.title).toBe('Admin Edited Task');
+    });
+
+    it('allows project OWNER to edit any task in project', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Owner Edited Task' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.title).toBe('Owner Edited Task');
+    });
+
+    it('rejects attempts to change a task parent project', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({
+          projectId: secondProjectId,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toContain('Changing task parent project is not permitted');
     });
 
     it('rejects updating assignee to a non-project member', async () => {
       const res = await request(app)
-        .patch(`/api/v1/tasks/${taskId}`)
+        .patch(`/api/v1/tasks/${memberTaskId}`)
         .set('Authorization', `Bearer ${memberToken}`)
         .send({
           assigneeId: outsiderUser.id,
@@ -504,7 +631,7 @@ describe('Task Management, Priorities, Status Transitions & Assignees Integratio
   });
 
   describe('Cross-Project & Cross-Workspace Isolation', () => {
-    it('prevents accessing tasks from another project without permission', async () => {
+    it('prevents accessing tasks from another project without permission (Anti-IDOR)', async () => {
       // Create task in second project
       const createRes = await request(app)
         .post(`/api/v1/projects/${secondProjectId}/tasks`)

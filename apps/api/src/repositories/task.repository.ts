@@ -115,35 +115,48 @@ export class PrismaTaskRepository implements ITaskRepository {
 
   public async create(data: CreateTaskData): Promise<TaskWithRelations> {
     try {
-      const taskNumber = await this.getNextTaskNumber(data.projectId);
+      // Use an interactive transaction with row-level lock on the parent project
+      // to ensure strictly monotonic and collision-free taskNumber assignment under concurrency
+      return await this.prisma.$transaction(async (tx) => {
+        // 1. Lock the parent project row to serialize task creation within this project
+        await tx.$executeRaw`SELECT id FROM "projects" WHERE id = ${data.projectId} FOR UPDATE`;
 
-      const task = await this.prisma.task.create({
-        data: {
-          taskNumber,
-          title: data.title,
-          description: data.description || null,
-          status: data.status || 'TODO',
-          priority: data.priority || 'MEDIUM',
-          dueDate: data.dueDate || null,
-          orderIndex: data.orderIndex || 0,
-          projectId: data.projectId,
-          creatorId: data.creatorId,
-          assigneeId: data.assigneeId || null,
-        },
-        include: {
-          creator: {
-            select: { id: true, email: true, name: true, avatarUrl: true },
+        // 2. Compute current max task number atomically
+        const aggregate = await tx.task.aggregate({
+          where: { projectId: data.projectId },
+          _max: { taskNumber: true },
+        });
+        const taskNumber = (aggregate._max.taskNumber ?? 0) + 1;
+
+        // 3. Insert task with unique compound (projectId, taskNumber)
+        const task = await tx.task.create({
+          data: {
+            taskNumber,
+            title: data.title,
+            description: data.description || null,
+            status: data.status || 'TODO',
+            priority: data.priority || 'MEDIUM',
+            dueDate: data.dueDate || null,
+            orderIndex: data.orderIndex || 0,
+            projectId: data.projectId,
+            creatorId: data.creatorId,
+            assigneeId: data.assigneeId || null,
           },
-          assignee: {
-            select: { id: true, email: true, name: true, avatarUrl: true },
+          include: {
+            creator: {
+              select: { id: true, email: true, name: true, avatarUrl: true },
+            },
+            assignee: {
+              select: { id: true, email: true, name: true, avatarUrl: true },
+            },
+            project: {
+              select: { id: true, name: true, key: true, workspaceId: true },
+            },
           },
-          project: {
-            select: { id: true, name: true, key: true, workspaceId: true },
-          },
-        },
+        });
+
+        return task as TaskWithRelations;
       });
-
-      return task as TaskWithRelations;
     } catch (err) {
       if (this.isConnectionError(err)) {
         this.handleDbError(err);
@@ -305,6 +318,22 @@ export class PrismaTaskRepository implements ITaskRepository {
 export class MemoryTaskRepository implements ITaskRepository {
   private tasks = new Map<string, TaskRecord>();
   private projectTaskCounters = new Map<string, number>();
+  private projectLocks = new Map<string, Promise<void>>();
+
+  private async acquireLock(projectId: string): Promise<() => void> {
+    while (this.projectLocks.has(projectId)) {
+      await this.projectLocks.get(projectId);
+    }
+    let release: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      release = () => {
+        this.projectLocks.delete(projectId);
+        resolve();
+      };
+    });
+    this.projectLocks.set(projectId, lockPromise);
+    return release!;
+  }
 
   public async getNextTaskNumber(projectId: string): Promise<number> {
     const current = this.projectTaskCounters.get(projectId) || 0;
@@ -333,27 +362,41 @@ export class MemoryTaskRepository implements ITaskRepository {
   }
 
   public async create(data: CreateTaskData): Promise<TaskWithRelations> {
-    const id = `tsk_${Math.random().toString(36).substring(2, 10)}_${Date.now()}`;
-    const taskNumber = await this.getNextTaskNumber(data.projectId);
+    const releaseLock = await this.acquireLock(data.projectId);
+    try {
+      const current = this.projectTaskCounters.get(data.projectId) || 0;
+      const taskNumber = current + 1;
+      this.projectTaskCounters.set(data.projectId, taskNumber);
 
-    const task: TaskRecord = {
-      id,
-      taskNumber,
-      title: data.title,
-      description: data.description || null,
-      status: data.status || 'TODO',
-      priority: data.priority || 'MEDIUM',
-      dueDate: data.dueDate || null,
-      orderIndex: data.orderIndex || 0,
-      projectId: data.projectId,
-      creatorId: data.creatorId,
-      assigneeId: data.assigneeId || null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+      // Enforce @@unique([projectId, taskNumber])
+      for (const t of this.tasks.values()) {
+        if (t.projectId === data.projectId && t.taskNumber === taskNumber) {
+          throw new Error('Unique constraint failed on the fields: (projectId, taskNumber)');
+        }
+      }
 
-    this.tasks.set(id, task);
-    return this.populateRelations(task);
+      const id = `tsk_${Math.random().toString(36).substring(2, 10)}_${Date.now()}`;
+      const task: TaskRecord = {
+        id,
+        taskNumber,
+        title: data.title,
+        description: data.description || null,
+        status: data.status || 'TODO',
+        priority: data.priority || 'MEDIUM',
+        dueDate: data.dueDate || null,
+        orderIndex: data.orderIndex || 0,
+        projectId: data.projectId,
+        creatorId: data.creatorId,
+        assigneeId: data.assigneeId || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      this.tasks.set(id, task);
+      return this.populateRelations(task);
+    } finally {
+      releaseLock();
+    }
   }
 
   public async findById(id: string): Promise<TaskWithRelations | null> {

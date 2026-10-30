@@ -26,8 +26,9 @@ projectflow/
 ├── prisma/
 │   └── schema.prisma         # PostgreSQL schema definition with Prisma
 ├── tests/
-│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
+│   ├── api/tasks.test.ts      # Supertest task management, concurrency & state machine tests (30 tests)
 │   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
+│   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
 │   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)
 │   ├── api/health.test.ts     # Supertest health tests (2 tests)
 │   └── unit/validation.test.ts # Zod schema unit tests (4 tests)

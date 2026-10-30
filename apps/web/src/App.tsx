@@ -909,7 +909,7 @@ export default function App() {
             </div>
             <div className="flex items-center justify-between">
               <span>Automated Tests</span>
-              <span className="font-mono text-emerald-400 font-bold">62 Passing</span>
+              <span className="font-mono text-emerald-400 font-bold">69 Passing</span>
             </div>
           </div>
         </aside>
@@ -1733,7 +1733,7 @@ export default function App() {
 ├── prisma/
 │   └── schema.prisma         # Task model with taskNumber, relations & indexes
 └── tests/
-    ├── api/tasks.test.ts      # 23 tests (CRUD, Transitions, RBAC, Assignee guard)
+    ├── api/tasks.test.ts      # 30 tests (Concurrency, Transitions, RBAC, Assignee guard)
     ├── api/projects.test.ts   # 10 tests (CRUD, Anti-IDOR, Roles)
     ├── api/workspaces.test.ts # 10 tests (CRUD, Roles, Members)
     ├── api/auth.test.ts       # 13 tests (JWT, Bcrypt, Invalidation)
@@ -1745,12 +1745,12 @@ export default function App() {
               <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-3">
                 <div className="flex items-center gap-2 text-indigo-400 text-sm font-semibold">
                   <GitBranch className="w-4 h-4" />
-                  Automated Test Coverage (62 Tests Passing)
+                  Automated Test Coverage (69 Tests Passing)
                 </div>
                 <div className="space-y-2 text-xs font-mono text-slate-300">
                   <div className="p-2.5 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
                     <span>tests/api/tasks.test.ts</span>
-                    <span className="text-emerald-400">23 / 23 Passed</span>
+                    <span className="text-emerald-400">30 / 30 Passed</span>
                   </div>
                   <div className="p-2.5 rounded bg-slate-950 border border-slate-800 flex items-center justify-between">
                     <span>tests/api/projects.test.ts</span>

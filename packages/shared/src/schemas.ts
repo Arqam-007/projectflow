@@ -141,6 +141,7 @@ export const UpdateTaskSchema = z.object({
   dueDate: z.string().nullable().optional(),
   assigneeId: z.string().nullable().optional(),
   orderIndex: z.coerce.number().int().min(0).optional(),
+  projectId: z.string().optional(),
 });
 
 export const UpdateTaskStatusSchema = z.object({

@@ -157,6 +157,7 @@ export interface UpdateTaskRequest {
   dueDate?: string | null;
   assigneeId?: string | null;
   orderIndex?: number;
+  projectId?: string;
 }
 
 export interface UpdateTaskStatusRequest {

@@ -116,6 +116,24 @@ export class TaskService {
     const existing = await taskRepository.findById(taskId);
     if (!existing) throw new NotFoundError('Task not found');
 
+    // Prevent changing task parent project / workspace
+    if ((data as Record<string, unknown>).projectId && (data as Record<string, unknown>).projectId !== existing.projectId) {
+      throw new BadRequestError('Changing task parent project is not permitted');
+    }
+
+    // Role-Based Access Control:
+    // OWNER and ADMIN can edit any task in the project.
+    // MEMBER can only edit tasks that they created or are assigned to.
+    const isCreator = existing.creatorId === userId;
+    const isAssignee = existing.assigneeId === userId;
+    const isPrivileged = userRole === 'ADMIN' || userRole === 'OWNER';
+
+    if (!isCreator && !isAssignee && !isPrivileged) {
+      throw new ForbiddenError(
+        'You do not have permission to edit this task. Only the task creator, assignee, project Admins, or Owners can edit this task.'
+      );
+    }
+
     // Assignee membership validation
     if (data.assigneeId !== undefined && data.assigneeId !== null) {
       const isMember = await projectRepository.findMember(existing.projectId, data.assigneeId);
@@ -150,10 +168,27 @@ export class TaskService {
   public async updateTaskStatus(
     taskId: string,
     newStatus: TaskStatus,
-    orderIndex?: number
+    orderIndex?: number,
+    userId?: string,
+    userRole?: Role
   ): Promise<TaskSummary> {
     const existing = await taskRepository.findById(taskId);
     if (!existing) throw new NotFoundError('Task not found');
+
+    // Role-Based Access Control:
+    // OWNER and ADMIN can transition any task in the project.
+    // MEMBER can transition their own tasks (created or assigned).
+    if (userId && userRole) {
+      const isCreator = existing.creatorId === userId;
+      const isAssignee = existing.assigneeId === userId;
+      const isPrivileged = userRole === 'ADMIN' || userRole === 'OWNER';
+
+      if (!isCreator && !isAssignee && !isPrivileged) {
+        throw new ForbiddenError(
+          'You do not have permission to change the status of this task. Only the task creator, assignee, project Admins, or Owners can update status.'
+        );
+      }
+    }
 
     if (!isValidStatusTransition(existing.status, newStatus)) {
       throw new BadRequestError(

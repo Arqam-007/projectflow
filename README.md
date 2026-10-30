@@ -16,7 +16,7 @@
 - **Authorization**: Role-Based Access Control (RBAC) with Owner, Admin, Member, Viewer permissions
 - **Database & ORM**: PostgreSQL 16, Prisma ORM
 - **Validation**: Zod (Strict runtime schema validation for request payloads, queries, and environment)
-- **Testing**: Vitest, Supertest (62 passing integration & unit tests)
+- **Testing**: Vitest, Supertest (69 passing integration & unit tests)
 - **DevOps & Containers**: Docker, Docker Compose, GitHub Actions CI
 
 ---
@@ -40,7 +40,7 @@ projectflow/
 ├── prisma/
 │   └── schema.prisma         # PostgreSQL schema definition with Prisma (Task model, taskNumber, relations)
 ├── tests/
-│   ├── api/tasks.test.ts      # Supertest task management & state machine tests (23 tests)
+│   ├── api/tasks.test.ts      # Supertest task management, concurrency & state machine tests (30 tests)
 │   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
 │   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
 │   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)

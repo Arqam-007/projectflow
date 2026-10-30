@@ -157,8 +157,8 @@ model Task {
   creator     User         @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Restrict)
   assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, taskNumber])
   @@index([projectId, status])
-  @@index([projectId, taskNumber])
   @@index([assigneeId])
   @@map("tasks")
 }
