@@ -166,10 +166,122 @@ export interface UpdateTaskStatusRequest {
 }
 
 export interface TaskFilterParams {
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  assigneeId?: string;
+  status?: TaskStatus | TaskStatus[];
+  priority?: TaskPriority | TaskPriority[];
+  assigneeId?: string; // user ID or 'unassigned'
   search?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  overdueOnly?: boolean;
+  sortBy?: 'createdAt' | 'dueDate' | 'priority' | 'taskNumber' | 'title' | 'status' | 'orderIndex';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  pagination: PaginationMeta;
+}
+
+export type ActivityAction =
+  | 'TASK_CREATED'
+  | 'TASK_UPDATED'
+  | 'STATUS_CHANGED'
+  | 'PRIORITY_CHANGED'
+  | 'ASSIGNEE_CHANGED'
+  | 'TASK_DELETED'
+  | 'PROJECT_CREATED'
+  | 'MEMBER_INVITED'
+  | 'MEMBER_REMOVED'
+  | 'ROLE_UPDATED';
+
+export interface ActivitySummary {
+  id: string;
+  workspaceId?: string | null;
+  projectId: string;
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  details?: Record<string, unknown> | null;
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    avatarUrl?: string | null;
+  };
+  project?: {
+    id: string;
+    name: string;
+    key: string;
+  };
+}
+
+export interface TaskStatusCounts {
+  TODO: number;
+  IN_PROGRESS: number;
+  IN_REVIEW: number;
+  DONE: number;
+  BACKLOG: number;
+}
+
+export interface TaskPriorityCounts {
+  LOW: number;
+  MEDIUM: number;
+  HIGH: number;
+  URGENT: number;
+}
+
+export interface ProjectAnalyticsSummary {
+  projectId: string;
+  projectName: string;
+  projectKey: string;
+  totalTasks: number;
+  completedTasks: number;
+  outstandingTasks: number;
+  completionRate: number; // percentage rounded to 1 decimal place
+  statusCounts: TaskStatusCounts;
+  priorityCounts: TaskPriorityCounts;
+  overdueTasksCount: number;
+  upcomingTasksCount: number;
+  overdueTasks: TaskSummary[];
+  upcomingTasks: TaskSummary[];
+  generatedAt?: string;
+}
+
+export interface WorkspaceAnalyticsSummary {
+  workspaceId: string;
+  workspaceName: string;
+  totalProjects: number;
+  totalTasks: number;
+  completedTasks: number;
+  outstandingTasks: number;
+  completionRate: number;
+  statusCounts: TaskStatusCounts;
+  priorityCounts: TaskPriorityCounts;
+  overdueTasksCount: number;
+  upcomingTasksCount: number;
+  projectBreakdowns: {
+    id: string;
+    name: string;
+    key: string;
+    totalTasks: number;
+    completedTasks: number;
+    completionRate: number;
+    overdueTasksCount: number;
+  }[];
+  generatedAt?: string;
 }
 
 export interface ApiResponse<T = unknown> {

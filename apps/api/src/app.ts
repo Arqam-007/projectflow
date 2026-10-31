@@ -43,3 +43,4 @@ export function createApp(): Express {
 }
 
 export const app = createApp();
+export default app;

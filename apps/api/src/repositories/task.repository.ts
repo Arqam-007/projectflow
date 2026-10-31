@@ -48,22 +48,43 @@ export interface UpdateTaskData {
 }
 
 export interface TaskFilters {
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  assigneeId?: string;
+  status?: TaskStatus | TaskStatus[];
+  priority?: TaskPriority | TaskPriority[];
+  assigneeId?: string; // user ID or 'unassigned'
   search?: string;
+  dueDateFrom?: Date | string;
+  dueDateTo?: Date | string;
+  overdueOnly?: boolean;
+  sortBy?: 'createdAt' | 'dueDate' | 'priority' | 'taskNumber' | 'title' | 'status' | 'orderIndex';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export interface TaskQueryResult {
+  items: TaskWithRelations[];
+  total: number;
 }
 
 export interface ITaskRepository {
   create(data: CreateTaskData): Promise<TaskWithRelations>;
   findById(id: string): Promise<TaskWithRelations | null>;
-  findByProject(projectId: string, filters?: TaskFilters): Promise<TaskWithRelations[]>;
+  findByProject(projectId: string, filters?: TaskFilters): Promise<TaskQueryResult>;
+  findAllByProject(projectId: string): Promise<TaskWithRelations[]>;
+  findByWorkspace(workspaceId: string): Promise<TaskWithRelations[]>;
   update(id: string, data: UpdateTaskData): Promise<TaskWithRelations>;
   updateStatus(id: string, status: TaskStatus, orderIndex?: number): Promise<TaskWithRelations>;
   delete(id: string): Promise<void>;
   getNextTaskNumber(projectId: string): Promise<number>;
   clear?(): Promise<void>;
 }
+
+const PRIORITY_ORDER: Record<TaskPriority, number> = {
+  LOW: 1,
+  MEDIUM: 2,
+  HIGH: 3,
+  URGENT: 4,
+};
 
 export class PrismaTaskRepository implements ITaskRepository {
   private prisma: PrismaClient;
@@ -86,7 +107,6 @@ export class PrismaTaskRepository implements ITaskRepository {
   }
 
   private handleDbError(err: unknown) {
-    // In strict PostgreSQL mode or production, NEVER silently fall back
     if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
       throw err;
     }
@@ -115,20 +135,15 @@ export class PrismaTaskRepository implements ITaskRepository {
 
   public async create(data: CreateTaskData): Promise<TaskWithRelations> {
     try {
-      // Use an interactive transaction with row-level lock on the parent project
-      // to ensure strictly monotonic and collision-free taskNumber assignment under concurrency
       return await this.prisma.$transaction(async (tx) => {
-        // 1. Lock the parent project row to serialize task creation within this project
         await tx.$executeRaw`SELECT id FROM "projects" WHERE id = ${data.projectId} FOR UPDATE`;
 
-        // 2. Compute current max task number atomically
         const aggregate = await tx.task.aggregate({
           where: { projectId: data.projectId },
           _max: { taskNumber: true },
         });
         const taskNumber = (aggregate._max.taskNumber ?? 0) + 1;
 
-        // 3. Insert task with unique compound (projectId, taskNumber)
         const task = await tx.task.create({
           data: {
             taskNumber,
@@ -193,13 +208,84 @@ export class PrismaTaskRepository implements ITaskRepository {
     }
   }
 
-  public async findByProject(projectId: string, filters?: TaskFilters): Promise<TaskWithRelations[]> {
+  public async findAllByProject(projectId: string): Promise<TaskWithRelations[]> {
+    try {
+      const tasks = await this.prisma.task.findMany({
+        where: { projectId },
+        include: {
+          creator: { select: { id: true, email: true, name: true, avatarUrl: true } },
+          assignee: { select: { id: true, email: true, name: true, avatarUrl: true } },
+          project: { select: { id: true, name: true, key: true, workspaceId: true } },
+        },
+        orderBy: [{ orderIndex: 'asc' }, { createdAt: 'desc' }],
+      });
+      return tasks as TaskWithRelations[];
+    } catch (err) {
+      if (this.isConnectionError(err)) {
+        this.handleDbError(err);
+        return this.fallbackMemoryRepo.findAllByProject(projectId);
+      }
+      throw err;
+    }
+  }
+
+  public async findByWorkspace(workspaceId: string): Promise<TaskWithRelations[]> {
+    try {
+      const tasks = await this.prisma.task.findMany({
+        where: {
+          project: {
+            workspaceId,
+          },
+        },
+        include: {
+          creator: { select: { id: true, email: true, name: true, avatarUrl: true } },
+          assignee: { select: { id: true, email: true, name: true, avatarUrl: true } },
+          project: { select: { id: true, name: true, key: true, workspaceId: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+      });
+      return tasks as TaskWithRelations[];
+    } catch (err) {
+      if (this.isConnectionError(err)) {
+        this.handleDbError(err);
+        return this.fallbackMemoryRepo.findByWorkspace(workspaceId);
+      }
+      throw err;
+    }
+  }
+
+  public async findByProject(projectId: string, filters?: TaskFilters): Promise<TaskQueryResult> {
     try {
       const where: Record<string, unknown> = { projectId };
 
-      if (filters?.status) where.status = filters.status;
-      if (filters?.priority) where.priority = filters.priority;
-      if (filters?.assigneeId) where.assigneeId = filters.assigneeId;
+      // Status filter (single or array)
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          where.status = { in: filters.status };
+        } else {
+          where.status = filters.status;
+        }
+      }
+
+      // Priority filter (single or array)
+      if (filters?.priority) {
+        if (Array.isArray(filters.priority)) {
+          where.priority = { in: filters.priority };
+        } else {
+          where.priority = filters.priority;
+        }
+      }
+
+      // Assignee filter
+      if (filters?.assigneeId) {
+        if (filters.assigneeId === 'unassigned') {
+          where.assigneeId = null;
+        } else {
+          where.assigneeId = filters.assigneeId;
+        }
+      }
+
+      // Search filter
       if (filters?.search) {
         where.OR = [
           { title: { contains: filters.search, mode: 'insensitive' } },
@@ -207,23 +293,65 @@ export class PrismaTaskRepository implements ITaskRepository {
         ];
       }
 
-      const tasks = await this.prisma.task.findMany({
-        where,
-        include: {
-          creator: {
-            select: { id: true, email: true, name: true, avatarUrl: true },
-          },
-          assignee: {
-            select: { id: true, email: true, name: true, avatarUrl: true },
-          },
-          project: {
-            select: { id: true, name: true, key: true, workspaceId: true },
-          },
-        },
-        orderBy: [{ orderIndex: 'asc' }, { createdAt: 'desc' }],
-      });
+      // Due date range filter
+      if (filters?.dueDateFrom || filters?.dueDateTo) {
+        const dateFilter: Record<string, Date> = {};
+        if (filters.dueDateFrom) {
+          dateFilter.gte = new Date(filters.dueDateFrom);
+        }
+        if (filters.dueDateTo) {
+          if (filters.dueDateTo instanceof Date) {
+            dateFilter.lte = filters.dueDateTo;
+          } else {
+            const rawTo = String(filters.dueDateTo).trim();
+            dateFilter.lte = /^\d{4}-\d{2}-\d{2}$/.test(rawTo)
+              ? new Date(`${rawTo}T23:59:59.999Z`)
+              : new Date(rawTo);
+          }
+        }
+        where.dueDate = dateFilter;
+      }
 
-      return tasks as TaskWithRelations[];
+      // Overdue only filter
+      if (filters?.overdueOnly) {
+        where.dueDate = { lt: new Date() };
+        where.status = { not: 'DONE' };
+      }
+
+      // Sorting
+      const sortField = filters?.sortBy || 'createdAt';
+      const sortDirection = filters?.sortOrder || 'desc';
+
+      // Always include a secondary tiebreaker for deterministic pagination
+      const orderBy: Record<string, 'asc' | 'desc'>[] = [
+        { [sortField]: sortDirection },
+        { id: 'asc' },
+      ];
+
+      // Pagination
+      const page = Math.max(1, filters?.page || 1);
+      const limit = Math.max(1, Math.min(100, filters?.limit || 50));
+      const skip = (page - 1) * limit;
+
+      const [total, items] = await Promise.all([
+        this.prisma.task.count({ where }),
+        this.prisma.task.findMany({
+          where,
+          include: {
+            creator: { select: { id: true, email: true, name: true, avatarUrl: true } },
+            assignee: { select: { id: true, email: true, name: true, avatarUrl: true } },
+            project: { select: { id: true, name: true, key: true, workspaceId: true } },
+          },
+          orderBy,
+          skip,
+          take: limit,
+        }),
+      ]);
+
+      return {
+        items: items as TaskWithRelations[],
+        total,
+      };
     } catch (err) {
       if (this.isConnectionError(err)) {
         this.handleDbError(err);
@@ -368,7 +496,6 @@ export class MemoryTaskRepository implements ITaskRepository {
       const taskNumber = current + 1;
       this.projectTaskCounters.set(data.projectId, taskNumber);
 
-      // Enforce @@unique([projectId, taskNumber])
       for (const t of this.tasks.values()) {
         if (t.projectId === data.projectId && t.taskNumber === taskNumber) {
           throw new Error('Unique constraint failed on the fields: (projectId, taskNumber)');
@@ -405,15 +532,57 @@ export class MemoryTaskRepository implements ITaskRepository {
     return this.populateRelations(task);
   }
 
-  public async findByProject(projectId: string, filters?: TaskFilters): Promise<TaskWithRelations[]> {
+  public async findAllByProject(projectId: string): Promise<TaskWithRelations[]> {
     const list: TaskWithRelations[] = [];
+    for (const task of this.tasks.values()) {
+      if (task.projectId === projectId) {
+        list.push(await this.populateRelations(task));
+      }
+    }
+    return list.sort((a, b) => a.orderIndex - b.orderIndex || b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  public async findByWorkspace(workspaceId: string): Promise<TaskWithRelations[]> {
+    const list: TaskWithRelations[] = [];
+    for (const task of this.tasks.values()) {
+      const project = await projectRepository.findById(task.projectId);
+      if (project && project.workspaceId === workspaceId) {
+        list.push(await this.populateRelations(task));
+      }
+    }
+    return list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  public async findByProject(projectId: string, filters?: TaskFilters): Promise<TaskQueryResult> {
+    let list: TaskRecord[] = [];
+
+    const now = new Date();
 
     for (const task of this.tasks.values()) {
       if (task.projectId !== projectId) continue;
 
-      if (filters?.status && task.status !== filters.status) continue;
-      if (filters?.priority && task.priority !== filters.priority) continue;
-      if (filters?.assigneeId && task.assigneeId !== filters.assigneeId) continue;
+      // Status filter (single or array)
+      if (filters?.status) {
+        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+        if (!statuses.includes(task.status)) continue;
+      }
+
+      // Priority filter (single or array)
+      if (filters?.priority) {
+        const priorities = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
+        if (!priorities.includes(task.priority)) continue;
+      }
+
+      // Assignee filter
+      if (filters?.assigneeId) {
+        if (filters.assigneeId === 'unassigned') {
+          if (task.assigneeId !== null) continue;
+        } else if (task.assigneeId !== filters.assigneeId) {
+          continue;
+        }
+      }
+
+      // Search filter
       if (filters?.search) {
         const query = filters.search.toLowerCase();
         const matchesTitle = task.title.toLowerCase().includes(query);
@@ -421,10 +590,92 @@ export class MemoryTaskRepository implements ITaskRepository {
         if (!matchesTitle && !matchesDesc) continue;
       }
 
-      list.push(await this.populateRelations(task));
+      // Due date range
+      if (filters?.dueDateFrom && (!task.dueDate || new Date(task.dueDate) < new Date(filters.dueDateFrom))) {
+        continue;
+      }
+      if (filters?.dueDateTo) {
+        let toLimit: Date;
+        if (filters.dueDateTo instanceof Date) {
+          toLimit = filters.dueDateTo;
+        } else {
+          const rawTo = String(filters.dueDateTo).trim();
+          toLimit = /^\d{4}-\d{2}-\d{2}$/.test(rawTo)
+            ? new Date(`${rawTo}T23:59:59.999Z`)
+            : new Date(rawTo);
+        }
+        if (!task.dueDate || new Date(task.dueDate) > toLimit) {
+          continue;
+        }
+      }
+
+      // Overdue filter
+      if (filters?.overdueOnly) {
+        if (!task.dueDate || new Date(task.dueDate) >= now || task.status === 'DONE') {
+          continue;
+        }
+      }
+
+      list.push(task);
     }
 
-    return list.sort((a, b) => a.orderIndex - b.orderIndex || b.createdAt.getTime() - a.createdAt.getTime());
+    // Sorting
+    const sortField = filters?.sortBy || 'createdAt';
+    const sortOrder = filters?.sortOrder || 'desc';
+    const factor = sortOrder === 'asc' ? 1 : -1;
+
+    list.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'priority': {
+          const valA = PRIORITY_ORDER[a.priority] || 0;
+          const valB = PRIORITY_ORDER[b.priority] || 0;
+          comparison = (valA - valB) * factor;
+          break;
+        }
+        case 'dueDate': {
+          const timeA = a.dueDate ? new Date(a.dueDate).getTime() : (sortOrder === 'asc' ? Infinity : -Infinity);
+          const timeB = b.dueDate ? new Date(b.dueDate).getTime() : (sortOrder === 'asc' ? Infinity : -Infinity);
+          comparison = (timeA - timeB) * factor;
+          break;
+        }
+        case 'taskNumber': {
+          comparison = (a.taskNumber - b.taskNumber) * factor;
+          break;
+        }
+        case 'title': {
+          comparison = a.title.localeCompare(b.title) * factor;
+          break;
+        }
+        case 'status': {
+          comparison = a.status.localeCompare(b.status) * factor;
+          break;
+        }
+        case 'orderIndex': {
+          comparison = (a.orderIndex - b.orderIndex) * factor;
+          break;
+        }
+        case 'createdAt':
+        default: {
+          comparison = (a.createdAt.getTime() - b.createdAt.getTime()) * factor;
+          break;
+        }
+      }
+
+      if (comparison !== 0) return comparison;
+      // Stable tiebreaker
+      return a.id.localeCompare(b.id);
+    });
+
+    const total = list.length;
+    const page = Math.max(1, filters?.page || 1);
+    const limit = Math.max(1, Math.min(100, filters?.limit || 50));
+    const skip = (page - 1) * limit;
+
+    const paged = list.slice(skip, skip + limit);
+    const items = await Promise.all(paged.map((t) => this.populateRelations(t)));
+
+    return { items, total };
   }
 
   public async update(id: string, data: UpdateTaskData): Promise<TaskWithRelations> {

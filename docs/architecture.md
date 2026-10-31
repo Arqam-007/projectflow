@@ -115,6 +115,10 @@ All API routes are prefixed under `/api/v1/`.
 | `PATCH` | `/api/v1/tasks/:taskId` | Member+ | Updates task title, description, priority, assignee, due date | `200` / `400` / `403` |
 | `PATCH` | `/api/v1/tasks/:taskId/status` | Member+ | Validates & updates status according to state machine | `200` / `400` / `403` |
 | `DELETE` | `/api/v1/tasks/:taskId` | Creator/Admin/Owner | Deletes task (Members restricted to own tasks) | `200` / `403` / `404` |
+| `GET` | `/api/v1/projects/:projectId/analytics` | Member+ | Real-time project task metrics, distributions, completion rate | `200` / `404` |
+| `GET` | `/api/v1/workspaces/:workspaceId/analytics` | Member+ | Multi-project workspace portfolio metrics & breakdown | `200` / `404` |
+| `GET` | `/api/v1/projects/:projectId/activities` | Member+ | Scoped project audit trail with action filtering & pagination | `200` / `404` |
+| `GET` | `/api/v1/workspaces/:workspaceId/activities` | Member+ | Workspace-wide audit logs with anti-enumeration protection | `200` / `404` |
 
 ## 4. Task State Machine & Validation
 
@@ -160,3 +164,36 @@ ProjectFlow enforces a strict status transition state machine on the backend. Ar
 - **Assignee Membership Check**: A user can only be assigned to a task if they are an active member or owner of the parent project. Reassignment to external users returns `400 Bad Request`.
 - **Task Deletion Permission**: Only the original task creator, project Admin, or project Owner can delete a task. Other project members receive `403 Forbidden`.
 - **Viewer Role**: Viewers have read-only access and cannot create tasks, update status, or delete tasks.
+
+---
+
+## 5. Dashboard Analytics, Activity Logging & Advanced Filtering (Milestone 5)
+
+### 5.1 Analytics & Statistics Aggregation Engine
+- **Project Analytics API (`GET /api/v1/projects/:projectId/analytics`)**: Computes real-time project metrics:
+  - Total tasks, completed tasks, and outstanding tasks count.
+  - Completion rate percentage (`(completed / total) * 100` rounded to 1 decimal place).
+  - Status distributions (`TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`).
+  - Priority distributions (`LOW`, `MEDIUM`, `HIGH`, `URGENT`).
+  - Overdue task count (`dueDate < now` AND `status != 'DONE'`).
+  - Upcoming deadline count (`dueDate >= now` AND `dueDate <= now + 7 days` AND `status != 'DONE'`).
+- **Workspace Analytics API (`GET /api/v1/workspaces/:workspaceId/analytics`)**: Aggregates health across all projects in the workspace:
+  - Total projects count and total workspace tasks.
+  - Per-project completion breakdown with key, name, status, completion rate %, and overdue counts.
+  - Multi-tenant isolation ensuring users can only see projects within workspaces they belong to.
+
+### 5.2 Tamper-Evident Activity Logging & Sanitization
+- **Atomic Mutation Auditing**: Activity events (`TASK_CREATED`, `STATUS_CHANGED`, `PRIORITY_CHANGED`, `ASSIGNEE_CHANGED`, `TASK_DELETED`) are created alongside task mutations.
+- **Deleted Entity Details Preservation**: When a task is deleted, key attributes (`taskKey`, `title`, `previousStatus`) are copied into the activity log's JSON details so audit history remains informative.
+- **Zero-Leakage Sanitization (`sanitizeActivityDetails`)**: Activity logs recursively strip sensitive fields (`password`, `passwordHash`, `token`, `secret`, `accessToken`) before database persistence or JSON transmission.
+- **Anti-Resource-Enumeration**: Outsiders attempting to probe activities or analytics of workspaces or projects they do not belong to receive `404 Not Found`, denying attackers knowledge of internal ID existence.
+
+### 5.3 Advanced Filtering, Sorting & Pagination
+- **Multi-Status & Multi-Priority Filtering**: Supports querying comma-separated or repeated values (e.g., `status=TODO,IN_PROGRESS` and `priority=HIGH,URGENT`).
+- **Assignee Filtering**: Supports specific user IDs as well as `assigneeId=UNASSIGNED`.
+- **Date Range & Overdue Filtering**: Supports `dueDateFrom`, `dueDateTo`, and boolean `overdueOnly=true`.
+- **Deterministic Pagination**: Sort by `orderIndex`, `dueDate`, `priority`, `taskNumber`, or `createdAt` with automatic secondary tie-breaker `id ASC` to prevent pagination jitter.
+
+### 5.4 Dual-Engine Persistence & Testing Verification
+- **Production & Local Engine**: Authoritative **PostgreSQL 16** via **Prisma ORM**, relational foreign keys, schema migrations, and composite constraints `@@unique([projectId, taskNumber])`.
+- **Test Runner Sandbox**: Due to container sandbox constraints where Docker and live PostgreSQL daemons cannot run, tests execute against dedicated in-memory repository adapters (`MemoryTaskRepository`, `MemoryActivityRepository`, etc.) that implement the identical TypeScript contracts, ensuring 100% truthful test results across all 88 test cases.

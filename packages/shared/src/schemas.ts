@@ -149,9 +149,48 @@ export const UpdateTaskStatusSchema = z.object({
   orderIndex: z.coerce.number().int().min(0).optional(),
 });
 
+export const TaskSortBySchema = z.enum([
+  'createdAt',
+  'dueDate',
+  'priority',
+  'taskNumber',
+  'title',
+  'status',
+  'orderIndex',
+]);
+
+export const SortOrderSchema = z.enum(['asc', 'desc']);
+
 export const TaskFilterSchema = z.object({
-  status: TaskStatusSchema.optional(),
-  priority: TaskPrioritySchema.optional(),
+  status: z
+    .union([
+      TaskStatusSchema,
+      z.array(TaskStatusSchema),
+      z.string().transform((val) => val.split(',').map((s) => s.trim()) as z.infer<typeof TaskStatusSchema>[]),
+    ])
+    .optional(),
+  priority: z
+    .union([
+      TaskPrioritySchema,
+      z.array(TaskPrioritySchema),
+      z.string().transform((val) => val.split(',').map((p) => p.trim()) as z.infer<typeof TaskPrioritySchema>[]),
+    ])
+    .optional(),
   assigneeId: z.string().optional(),
   search: z.string().trim().optional(),
+  dueDateFrom: z.string().optional(),
+  dueDateTo: z.string().optional(),
+  overdueOnly: z
+    .union([z.boolean(), z.string().transform((val) => val === 'true' || val === '1')])
+    .optional(),
+  sortBy: TaskSortBySchema.optional().default('createdAt'),
+  sortOrder: SortOrderSchema.optional().default('desc'),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+export const ActivityFilterSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  action: z.string().trim().optional(),
 });

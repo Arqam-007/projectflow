@@ -55,8 +55,11 @@ import {
 import {
   CreateTaskSchema,
   TaskFilterSchema,
+  ActivityFilterSchema,
 } from '../../../../../packages/shared/src/schemas.js';
 import { validateQuery } from '../../middleware/validate.js';
+import { getProjectAnalyticsHandler } from '../../controllers/analytics.controller.js';
+import { getProjectActivitiesHandler } from '../../controllers/activity.controller.js';
 
 // Project Tasks
 router.post(
@@ -72,6 +75,23 @@ router.get(
   requireProjectRole(),
   validateQuery(TaskFilterSchema),
   listProjectTasksHandler
+);
+
+// Project Analytics and Activity
+router.get('/:projectId/analytics', authenticateToken, requireProjectRole(), getProjectAnalyticsHandler);
+router.get(
+  '/:projectId/activity',
+  authenticateToken,
+  requireProjectRole(),
+  validateQuery(ActivityFilterSchema),
+  getProjectActivitiesHandler
+);
+router.get(
+  '/:projectId/activities',
+  authenticateToken,
+  requireProjectRole(),
+  validateQuery(ActivityFilterSchema),
+  getProjectActivitiesHandler
 );
 
 export default router;

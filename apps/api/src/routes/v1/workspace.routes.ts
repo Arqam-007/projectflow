@@ -15,7 +15,7 @@ import {
   listWorkspaceProjectsHandler,
 } from '../../controllers/project.controller.js';
 import { authenticateToken } from '../../middleware/auth.js';
-import { validateBody } from '../../middleware/validate.js';
+import { validateBody, validateQuery } from '../../middleware/validate.js';
 import { requireWorkspaceRole } from '../../middleware/rbac.js';
 import {
   CreateWorkspaceSchema,
@@ -23,6 +23,7 @@ import {
   AddMemberSchema,
   UpdateRoleSchema,
   CreateProjectSchema,
+  ActivityFilterSchema,
 } from '../../../../../packages/shared/src/schemas.js';
 
 const router = Router();
@@ -69,5 +70,25 @@ router.post(
   createProjectHandler
 );
 router.get('/:workspaceId/projects', authenticateToken, requireWorkspaceRole(), listWorkspaceProjectsHandler);
+
+// Workspace Analytics and Activity Logs
+import { getWorkspaceAnalyticsHandler } from '../../controllers/analytics.controller.js';
+import { getWorkspaceActivitiesHandler } from '../../controllers/activity.controller.js';
+
+router.get('/:workspaceId/analytics', authenticateToken, requireWorkspaceRole(), getWorkspaceAnalyticsHandler);
+router.get(
+  '/:workspaceId/activity',
+  authenticateToken,
+  requireWorkspaceRole(),
+  validateQuery(ActivityFilterSchema),
+  getWorkspaceActivitiesHandler
+);
+router.get(
+  '/:workspaceId/activities',
+  authenticateToken,
+  requireWorkspaceRole(),
+  validateQuery(ActivityFilterSchema),
+  getWorkspaceActivitiesHandler
+);
 
 export default router;

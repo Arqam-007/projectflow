@@ -75,6 +75,7 @@ model Workspace {
   owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     WorkspaceMember[]
   projects    Project[]
+  activityLogs ActivityLog[]
 
   @@index([ownerId])
   @@map("workspaces")
@@ -164,19 +165,22 @@ model Task {
 }
 
 model ActivityLog {
-  id         String   @id @default(uuid())
-  projectId  String
-  userId     String
-  action     String   // e.g. "TASK_CREATED", "STATUS_UPDATED", "MEMBER_INVITED"
-  entityType String   // e.g. "TASK", "PROJECT", "MEMBER"
-  entityId   String
-  details    Json?
-  createdAt  DateTime @default(now())
+  id          String     @id @default(uuid())
+  workspaceId String?
+  projectId   String
+  userId      String
+  action      String     // e.g. "TASK_CREATED", "STATUS_UPDATED", "MEMBER_INVITED"
+  entityType  String     // e.g. "TASK", "PROJECT", "MEMBER"
+  entityId    String
+  details     Json?
+  createdAt   DateTime   @default(now())
 
   // Relationships
-  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([projectId, createdAt])
+  @@index([workspaceId, createdAt])
   @@map("activity_logs")
 }

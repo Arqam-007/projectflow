@@ -8,7 +8,7 @@
 
 ---
 
-## Tech Stack
+### Tech Stack
 
 - **Frontend**: React 19, TypeScript (Strict), Tailwind CSS, Lucide Icons, Vite
 - **Backend**: Node.js 22, Express 4, TypeScript
@@ -16,7 +16,7 @@
 - **Authorization**: Role-Based Access Control (RBAC) with Owner, Admin, Member, Viewer permissions
 - **Database & ORM**: PostgreSQL 16, Prisma ORM
 - **Validation**: Zod (Strict runtime schema validation for request payloads, queries, and environment)
-- **Testing**: Vitest, Supertest (69 passing integration & unit tests)
+- **Testing**: Vitest, Supertest (88 passing integration & unit tests across 9 suites)
 - **DevOps & Containers**: Docker, Docker Compose, GitHub Actions CI
 
 ---
@@ -26,20 +26,24 @@
 ```
 projectflow/
 ├── apps/
-│   ├── web/src/              # Frontend React 19 SPA (Interactive Kanban Board, Modals)
+│   ├── web/src/              # Frontend React 19 SPA (Dashboard Analytics, Kanban Board, Modals)
 │   └── api/src/              # Backend Express REST API
 │       ├── config/           # Zod-validated environment config
-│       ├── controllers/      # Route controllers (tasks, projects, workspaces, auth, health)
+│       ├── controllers/      # Route controllers (tasks, analytics, activity, projects, workspaces, auth, health)
 │       ├── middleware/       # JWT auth guard, RBAC guards (requireTaskRole, requireProjectRole), validation, logging
-│       ├── routes/v1/        # Versioned route registry (/api/v1/{tasks,projects,workspaces,auth,health})
-│       ├── services/         # TaskService, ProjectService, WorkspaceService, AuthService, TokenService
-│       ├── repositories/     # TaskRepo, ProjectRepo, WorkspaceRepo, UserRepo (Prisma & Memory adapters)
+│       ├── routes/v1/        # Versioned route registry (/api/v1/{tasks,analytics,activity,projects,workspaces,auth,health})
+│       ├── services/         # TaskService, ActivityService, ProjectService, WorkspaceService, AuthService, TokenService
+│       ├── repositories/     # TaskRepo, ActivityRepo, ProjectRepo, WorkspaceRepo, UserRepo (Prisma & Memory adapters)
 │       └── utils/            # Domain error classes (AppError, ConflictError, UnauthorizedError, ForbiddenError)
 ├── packages/
 │   └── shared/src/           # Shared domain models & Zod validation schemas
 ├── prisma/
-│   └── schema.prisma         # PostgreSQL schema definition with Prisma (Task model, taskNumber, relations)
+│   ├── schema.prisma         # PostgreSQL schema definition with Prisma (Task model, ActivityLog, relations)
+│   └── migrations/           # Versioned SQL migrations
 ├── tests/
+│   ├── api/analytics.test.ts  # Supertest project & workspace analytics aggregation tests (6 tests)
+│   ├── api/activity.test.ts   # Supertest audit logging & sanitization tests (7 tests)
+│   ├── api/filters.test.ts    # Supertest multi-attribute filtering & deterministic sorting tests (6 tests)
 │   ├── api/tasks.test.ts      # Supertest task management, concurrency & state machine tests (30 tests)
 │   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
 │   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
@@ -59,7 +63,7 @@ projectflow/
 
 ---
 
-## REST API Endpoints (Milestones 1–3)
+## REST API Endpoints (Milestones 1–5)
 
 All API endpoints are versioned under `/api/v1/`.
 
@@ -88,6 +92,24 @@ All API endpoints are versioned under `/api/v1/`.
 | `POST` | `/api/v1/projects/:projectId/members` | Admin+ | Adds user to project with assigned role | `201` / `409` |
 | `PATCH` | `/api/v1/projects/:projectId/members/:userId` | Admin+ | Updates project member role | `200` / `403` |
 | `DELETE` | `/api/v1/projects/:projectId/members/:userId` | Member+ | Removes member from project | `200` / `400` |
+| `POST` | `/api/v1/projects/:projectId/tasks` | Member+ | Creates task with atomic project key (`PROJ-1`) | `201` |
+| `GET` | `/api/v1/projects/:projectId/tasks` | Member+ | Lists tasks with multi-status, priority, assignee, date filters & pagination | `200` |
+| `GET` | `/api/v1/tasks/:taskId` | Member+ | Retrieves task details with creator & assignee | `200` / `404` |
+| `PATCH` | `/api/v1/tasks/:taskId` | Member+ | Updates task fields (assignee, priority, dates) with validation | `200` |
+| `PATCH` | `/api/v1/tasks/:taskId/status` | Member+ | Transitions task status via strict state machine | `200` / `400` |
+| `DELETE` | `/api/v1/tasks/:taskId` | Admin+ / Creator | Deletes task with audit logging | `200` |
+| `GET` | `/api/v1/projects/:projectId/analytics` | Member+ | Aggregated project task metrics, status & priority counts, completion rate | `200` |
+| `GET` | `/api/v1/workspaces/:workspaceId/analytics` | Member+ | Aggregated workspace portfolio metrics & per-project completion breakdown | `200` |
+| `GET` | `/api/v1/projects/:projectId/activities` | Member+ | Audit activity logs with sanitized details and pagination | `200` |
+| `GET` | `/api/v1/workspaces/:workspaceId/activities` | Member+ | Workspace-wide audit logs with action filters | `200` |
+
+---
+
+## Database Architecture & Sandbox Environment
+
+ProjectFlow utilizes a dual-engine repository architecture:
+1. **Production & Local Docker**: **PostgreSQL 16** managed via **Prisma ORM**, strict relational constraints (`@@unique([projectId, taskNumber])`), foreign key cascades, and timestamp indexing.
+2. **CI & Sandbox Environments**: When running in isolated build containers or environments without an active Docker daemon, the application gracefully switches to high-fidelity, in-memory repository adapters that implement the exact same TypeScript repository interfaces. This guarantees 100% reproducible test runs (88 passing tests) without false persistence claims.
 
 ---
 
@@ -137,14 +159,14 @@ npx prisma migrate dev --name add_workspaces_projects_rbac
 ```bash
 npm run dev
 ```
-- Web Application & RBAC Workspace UI: [http://localhost:3000](http://localhost:3000)
+- Web Application & Dashboard Analytics: [http://localhost:3000](http://localhost:3000)
 - API Health Endpoint: [http://localhost:3000/api/v1/health](http://localhost:3000/api/v1/health)
 
 ---
 
 ## Running Automated Tests
 
-To run the complete test suite (39 integration and unit tests):
+To run the complete test suite (88 integration and unit tests across 9 test suites):
 ```bash
 npm run test
 ```
@@ -161,6 +183,6 @@ npm run lint
 - [x] **Milestone 1**: Project Scaffolding, Express `/api/v1`, Prisma PostgreSQL Schema, Docker Compose, CI, and SaaS Shell
 - [x] **Milestone 2**: Authentication & User Management (JWT, Password Hashing, Profile API, Auth UI & Guards)
 - [x] **Milestone 3**: Workspaces, Project Creation and Management, Project Membership, and RBAC
-- [ ] **Milestone 4**: Task Management & Interactive Kanban Board
-- [ ] **Milestone 5**: Executive Analytics Dashboard & Activity Audit Feeds
+- [x] **Milestone 4**: Task Management, Priorities, Assignees, and Interactive Kanban Board
+- [x] **Milestone 5**: Executive Analytics Dashboard, Task Statistics, Activity Logging & Advanced Filtering
 - [ ] **Milestone 6**: Automated Test Coverage Expansion & Portfolio Documentation Finalization

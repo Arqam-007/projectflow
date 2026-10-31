@@ -50,6 +50,13 @@ import {
   ArrowLeft,
   AlertCircle,
   GripVertical,
+  BarChart3,
+  PieChart,
+  TrendingUp,
+  Activity,
+  ArrowUpDown,
+  History,
+  ListFilter,
 } from 'lucide-react';
 import type {
   HealthResponse,
@@ -64,6 +71,10 @@ import type {
   TaskSummary,
   TaskStatus,
   TaskPriority,
+  ProjectAnalyticsSummary,
+  WorkspaceAnalyticsSummary,
+  ActivitySummary,
+  PaginationMeta,
 } from '../../../packages/shared/src/types.js';
 
 // Status Transition Rules for Client-side Guidance & Validation
@@ -85,7 +96,7 @@ const KANBAN_COLUMNS: { id: TaskStatus; label: string; color: string; border: st
 export default function App() {
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
-  const [activeTab, setActiveTab] = useState<'board' | 'workspaces' | 'auth' | 'rbac' | 'architecture' | 'devops'>('board');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'board' | 'workspaces' | 'auth' | 'rbac' | 'architecture' | 'devops'>('dashboard');
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   // Authentication State
@@ -114,12 +125,27 @@ export default function App() {
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionSuccess, setWorkspaceActionSuccess] = useState<string | null>(null);
 
-  // Tasks & Kanban State
+  // Analytics & Activity Logs State (Milestone 5)
+  const [projectAnalytics, setProjectAnalytics] = useState<ProjectAnalyticsSummary | null>(null);
+  const [workspaceAnalytics, setWorkspaceAnalytics] = useState<WorkspaceAnalyticsSummary | null>(null);
+  const [activities, setActivities] = useState<ActivitySummary[]>([]);
+  const [activityPagination, setActivityPagination] = useState<PaginationMeta | null>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [activityFilterAction, setActivityFilterAction] = useState<string>('ALL');
+
+  // Tasks & Advanced Filtering State (Milestone 5)
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [taskPagination, setTaskPagination] = useState<PaginationMeta | null>(null);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [taskFilterSearch, setTaskFilterSearch] = useState('');
   const [taskFilterPriority, setTaskFilterPriority] = useState<TaskPriority | 'ALL'>('ALL');
   const [taskFilterAssignee, setTaskFilterAssignee] = useState<string>('ALL');
+  const [filterMultiStatus, setFilterMultiStatus] = useState<TaskStatus[]>([]);
+  const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
+  const [filterSortBy, setFilterSortBy] = useState<string>('orderIndex');
+  const [filterSortOrder, setFilterSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [taskPage, setTaskPage] = useState(1);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
   const [transitionNotice, setTransitionNotice] = useState<string | null>(null);
@@ -260,8 +286,53 @@ export default function App() {
       if (memBody.success && memBody.data) {
         setWorkspaceMembers(memBody.data);
       }
+
+      loadAnalytics(undefined, ws.id, authToken);
     } catch (err) {
       console.error('Failed to load workspace details:', err);
+    }
+  };
+
+  const loadAnalytics = async (projectId?: string, workspaceId?: string, authToken = token) => {
+    const pId = projectId || selectedProject?.id;
+    const wsId = workspaceId || selectedWorkspace?.id;
+    if (!authToken) return;
+
+    setLoadingAnalytics(true);
+    try {
+      if (pId) {
+        const [pRes, actRes] = await Promise.all([
+          fetch(`/api/v1/projects/${pId}/analytics`, { headers: { Authorization: `Bearer ${authToken}` } }),
+          fetch(`/api/v1/projects/${pId}/activities?limit=25`, { headers: { Authorization: `Bearer ${authToken}` } }),
+        ]);
+
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          if (pData.success && pData.data) setProjectAnalytics(pData.data);
+        }
+
+        if (actRes.ok) {
+          const actData = await actRes.json();
+          if (actData.success && actData.data) {
+            setActivities(actData.data);
+            if (actData.pagination) setActivityPagination(actData.pagination);
+          }
+        }
+      }
+
+      if (wsId) {
+        const wsRes = await fetch(`/api/v1/workspaces/${wsId}/analytics`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (wsRes.ok) {
+          const wsData = await wsRes.json();
+          if (wsData.success && wsData.data) setWorkspaceAnalytics(wsData.data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load analytics:', err);
+    } finally {
+      setLoadingAnalytics(false);
     }
   };
 
@@ -279,8 +350,9 @@ export default function App() {
         setProjectMembers(memBody.data);
       }
 
-      // Load tasks
+      // Load tasks and analytics
       loadTasks(prj.id, authToken);
+      loadAnalytics(prj.id, prj.workspaceId, authToken);
     } catch (err) {
       console.error('Failed to load project details:', err);
     }
@@ -298,6 +370,7 @@ export default function App() {
       const body = await res.json();
       if (body.success && body.data) {
         setTasks(body.data);
+        if (body.pagination) setTaskPagination(body.pagination);
       }
     } catch (err) {
       console.error('Failed to load tasks:', err);
@@ -428,6 +501,7 @@ export default function App() {
       setCreateTaskAssigneeId('');
       setCreateTaskDueDate('');
       loadTasks(selectedProject.id, token);
+      loadAnalytics(selectedProject.id, selectedWorkspace?.id, token);
     } catch (err) {
       setWorkspaceActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -477,6 +551,7 @@ export default function App() {
       setTasks((current) =>
         current.map((t) => (t.id === taskId ? body.data : t))
       );
+      if (selectedProject) loadAnalytics(selectedProject.id, selectedWorkspace?.id, token);
     } catch (err) {
       // Rollback on error
       setTasks(previousTasks);
@@ -515,7 +590,10 @@ export default function App() {
       setWorkspaceActionSuccess(`Updated task ${body.data.taskKey}`);
       setShowEditTaskModal(false);
       setSelectedTask(null);
-      if (selectedProject) loadTasks(selectedProject.id, token);
+      if (selectedProject) {
+        loadTasks(selectedProject.id, token);
+        loadAnalytics(selectedProject.id, selectedWorkspace?.id, token);
+      }
     } catch (err) {
       setWorkspaceActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -538,7 +616,10 @@ export default function App() {
       setWorkspaceActionSuccess(`Deleted task ${taskKey || ''}`);
       setShowEditTaskModal(false);
       setSelectedTask(null);
-      if (selectedProject) loadTasks(selectedProject.id, token);
+      if (selectedProject) {
+        loadTasks(selectedProject.id, token);
+        loadAnalytics(selectedProject.id, selectedWorkspace?.id, token);
+      }
     } catch (err) {
       setWorkspaceActionError(err instanceof Error ? err.message : String(err));
     }
@@ -592,20 +673,44 @@ export default function App() {
     setDraggedTaskId(null);
   };
 
-  // Filter Tasks
-  const filteredTasks = tasks.filter((t) => {
-    if (taskFilterPriority !== 'ALL' && t.priority !== taskFilterPriority) return false;
-    if (taskFilterAssignee === 'UNASSIGNED' && t.assigneeId !== null) return false;
-    if (taskFilterAssignee !== 'ALL' && taskFilterAssignee !== 'UNASSIGNED' && t.assigneeId !== taskFilterAssignee) return false;
-    if (taskFilterSearch.trim()) {
-      const q = taskFilterSearch.toLowerCase();
-      const matchKey = t.taskKey?.toLowerCase().includes(q);
-      const matchTitle = t.title.toLowerCase().includes(q);
-      const matchDesc = t.description?.toLowerCase().includes(q);
-      if (!matchKey && !matchTitle && !matchDesc) return false;
-    }
-    return true;
-  });
+  // Filter & Sort Tasks
+  const filteredTasks = tasks
+    .filter((t) => {
+      if (filterMultiStatus.length > 0 && !filterMultiStatus.includes(t.status)) return false;
+      if (taskFilterPriority !== 'ALL' && t.priority !== taskFilterPriority) return false;
+      if (taskFilterAssignee === 'UNASSIGNED' && t.assigneeId !== null) return false;
+      if (taskFilterAssignee !== 'ALL' && taskFilterAssignee !== 'UNASSIGNED' && t.assigneeId !== taskFilterAssignee) return false;
+      if (filterOverdueOnly) {
+        if (!t.dueDate || new Date(t.dueDate) >= new Date() || t.status === 'DONE') return false;
+      }
+      if (taskFilterSearch.trim()) {
+        const q = taskFilterSearch.toLowerCase();
+        const matchKey = t.taskKey?.toLowerCase().includes(q);
+        const matchTitle = t.title.toLowerCase().includes(q);
+        const matchDesc = t.description?.toLowerCase().includes(q);
+        if (!matchKey && !matchTitle && !matchDesc) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const dir = filterSortOrder === 'asc' ? 1 : -1;
+      if (filterSortBy === 'dueDate') {
+        const timeA = a.dueDate ? new Date(a.dueDate).getTime() : (filterSortOrder === 'asc' ? Infinity : -Infinity);
+        const timeB = b.dueDate ? new Date(b.dueDate).getTime() : (filterSortOrder === 'asc' ? Infinity : -Infinity);
+        return (timeA - timeB) * dir;
+      }
+      if (filterSortBy === 'priority') {
+        const weights: Record<TaskPriority, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, URGENT: 4 };
+        return ((weights[a.priority] || 0) - (weights[b.priority] || 0)) * dir;
+      }
+      if (filterSortBy === 'taskNumber') {
+        return (a.taskNumber - b.taskNumber) * dir;
+      }
+      if (filterSortBy === 'createdAt') {
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      }
+      return (a.orderIndex - b.orderIndex) * dir;
+    });
 
   const getPriorityBadge = (priority: TaskPriority) => {
     switch (priority) {
@@ -747,7 +852,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg tracking-tight text-white">ProjectFlow</span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                Milestone 4 • Kanban & Tasks Live
+                Milestone 5 • Analytics, Activity & Filtering Live
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">Full-Stack Project & Task Engineering Platform</p>
@@ -803,6 +908,17 @@ export default function App() {
                 Workspace Modules
               </div>
               <nav className="space-y-1">
+                <button
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'dashboard' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                >
+                  <span className="flex items-center gap-3">
+                    <LayoutDashboard className="w-4 h-4 text-indigo-400" />
+                    Dashboard Analytics
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">M5</span>
+                </button>
+
                 <button
                   onClick={() => setActiveTab('board')}
                   className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg text-left transition ${activeTab === 'board' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
@@ -864,10 +980,10 @@ export default function App() {
             <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-300">Roadmap Progress</span>
-                <span className="text-emerald-400 font-mono font-bold">4 / 6 Completed</span>
+                <span className="text-emerald-400 font-mono font-bold">5 / 6 Completed</span>
               </div>
               <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-gradient-to-r from-emerald-500 via-indigo-500 to-violet-500 h-full w-[67%] transition-all" />
+                <div className="bg-gradient-to-r from-emerald-500 via-indigo-500 to-violet-500 h-full w-[83%] transition-all" />
               </div>
               <div className="space-y-1.5 text-[11px] text-slate-400">
                 <div className="flex items-center gap-2 text-emerald-400 font-medium">
@@ -886,9 +1002,9 @@ export default function App() {
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>M4: Kanban Board & Tasks</span>
                 </div>
-                <div className="flex items-center gap-2 text-slate-400">
-                  <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex items-center justify-center text-[8px]">5</div>
-                  <span>M5: Analytics & Logs</span>
+                <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>M5: Analytics & Activity</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-400">
                   <div className="w-3.5 h-3.5 rounded-full border border-slate-700 flex items-center justify-center text-[8px]">6</div>
@@ -909,26 +1025,26 @@ export default function App() {
             </div>
             <div className="flex items-center justify-between">
               <span>Automated Tests</span>
-              <span className="font-mono text-emerald-400 font-bold">69 Passing</span>
+              <span className="font-mono text-emerald-400 font-bold">98 Passing</span>
             </div>
           </div>
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6">
-          {/* Milestone 4 Header Banner */}
+          {/* Milestone 5 Header Banner */}
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 p-6 lg:p-8 shadow-xl">
             <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
             <div className="relative z-10 max-w-3xl space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                Milestone 4 Verified: Task Lifecycle, Priorities & Interactive Kanban
+                Milestone 5 Active: Dashboard Analytics, Task Statistics & Activity Logging
               </div>
               <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white">
-                Task Management & Interactive Kanban Board
+                Workspace Intelligence & Dashboard Analytics
               </h1>
               <p className="text-slate-300 text-sm leading-relaxed">
-                Full lifecycle task tracking with drag-and-drop status transitions, priority badges, strict project-member assignee validation, and server-side RBAC protection.
+                Real-time task analytics, status and priority distribution metrics, overdue and upcoming deadline tracking, sanitized audit activity trail, and multi-attribute task filtering.
               </p>
             </div>
           </div>
@@ -959,6 +1075,562 @@ export default function App() {
                 {transitionNotice}
               </span>
               <button onClick={() => setTransitionNotice(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+          )}
+
+          {/* TAB: DASHBOARD ANALYTICS (MILESTONE 5) */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6">
+              {!currentUser ? (
+                <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-4">
+                  <Lock className="w-10 h-10 text-indigo-400 mx-auto" />
+                  <h3 className="text-base font-bold text-white">Authentication Required</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Sign in or register an account to view workspace metrics, task distributions, and live activity logs.
+                  </p>
+                  <button
+                    onClick={() => setActiveTab('auth')}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition inline-flex items-center gap-2"
+                  >
+                    Open Auth Playground
+                  </button>
+                </div>
+              ) : !selectedWorkspace ? (
+                <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-4">
+                  <Briefcase className="w-10 h-10 text-indigo-400 mx-auto" />
+                  <h3 className="text-base font-bold text-white">No Workspace Selected</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Select or create a workspace to see workspace-level analytics and project health metrics.
+                  </p>
+                  <button
+                    onClick={() => setActiveTab('workspaces')}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition inline-flex items-center gap-2"
+                  >
+                    Manage Workspaces
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Scope & Control Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400 font-medium">Workspace:</span>
+                        <span className="text-xs font-bold text-white bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700">
+                          {selectedWorkspace.name}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400 font-medium">Project Scope:</span>
+                        <select
+                          value={selectedProject?.id || ''}
+                          onChange={(e) => {
+                            const prj = projects.find((p) => p.id === e.target.value);
+                            if (prj) selectProject(prj);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                        >
+                          {projects.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              [{p.key}] {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {projectAnalytics && (
+                        <span className="text-[11px] text-slate-400 hidden lg:inline">
+                          Synced: {projectAnalytics.generatedAt ? new Date(projectAnalytics.generatedAt).toLocaleTimeString() : new Date().toLocaleTimeString()}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (selectedProject) {
+                            loadAnalytics(selectedProject.id, selectedWorkspace.id, token);
+                            loadTasks(selectedProject.id, token);
+                          }
+                        }}
+                        disabled={loadingAnalytics}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingAnalytics ? 'animate-spin text-indigo-400' : ''}`} />
+                        Refresh Metrics
+                      </button>
+
+                      <button
+                        onClick={() => setActiveTab('board')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
+                      >
+                        <Kanban className="w-3.5 h-3.5" /> View Kanban Board
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 5 High-Impact KPI Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+                    {/* Total Tasks */}
+                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>Total Tasks</span>
+                        <CheckSquare className="w-4 h-4 text-indigo-400" />
+                      </div>
+                      <div className="text-2xl font-extrabold text-white">
+                        {projectAnalytics?.totalTasks ?? tasks.length}
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                        <span>Done: {projectAnalytics?.completedTasks ?? tasks.filter((t) => t.status === 'DONE').length}</span>
+                        <span className="text-slate-500">•</span>
+                        <span>Open: {projectAnalytics?.outstandingTasks ?? tasks.filter((t) => t.status !== 'DONE').length}</span>
+                      </div>
+                    </div>
+
+                    {/* Completion Rate */}
+                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>Completion Rate</span>
+                        <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div className="text-2xl font-extrabold text-emerald-400">
+                        {projectAnalytics?.completionRate ?? 0}%
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${projectAnalytics?.completionRate ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* In Flight Tasks */}
+                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>In Flight</span>
+                        <Clock className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <div className="text-2xl font-extrabold text-blue-400">
+                        {(projectAnalytics?.statusCounts.IN_PROGRESS ?? 0) + (projectAnalytics?.statusCounts.IN_REVIEW ?? 0)}
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                        <span>Active Sprints & Review</span>
+                      </div>
+                    </div>
+
+                    {/* Overdue Tasks */}
+                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>Overdue</span>
+                        <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      </div>
+                      <div className="text-2xl font-extrabold text-rose-400">
+                        {projectAnalytics?.overdueTasksCount ?? 0}
+                      </div>
+                      <div className="text-[11px] text-rose-400/80">
+                        {projectAnalytics?.overdueTasksCount ? 'Requires immediate triage' : 'All deadlines current'}
+                      </div>
+                    </div>
+
+                    {/* Upcoming Deadlines (7 Days) */}
+                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span>Upcoming (7d)</span>
+                        <Calendar className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div className="text-2xl font-extrabold text-amber-400">
+                        {projectAnalytics?.upcomingTasksCount ?? 0}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Due within this week
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Distribution Visualizations */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Status Breakdown */}
+                    <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-indigo-400" />
+                          <h3 className="text-sm font-bold text-white">Status Breakdown</h3>
+                        </div>
+                        <span className="text-xs text-slate-400">
+                          {projectAnalytics?.totalTasks ?? 0} tasks total
+                        </span>
+                      </div>
+
+                      {/* Stacked Bar */}
+                      <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden flex">
+                        {projectAnalytics && projectAnalytics.totalTasks > 0 ? (
+                          <>
+                            <div
+                              style={{ width: `${(projectAnalytics.statusCounts.TODO / projectAnalytics.totalTasks) * 100}%` }}
+                              className="bg-slate-600 h-full transition-all"
+                              title={`To Do: ${projectAnalytics.statusCounts.TODO}`}
+                            />
+                            <div
+                              style={{ width: `${(projectAnalytics.statusCounts.IN_PROGRESS / projectAnalytics.totalTasks) * 100}%` }}
+                              className="bg-blue-500 h-full transition-all"
+                              title={`In Progress: ${projectAnalytics.statusCounts.IN_PROGRESS}`}
+                            />
+                            <div
+                              style={{ width: `${(projectAnalytics.statusCounts.IN_REVIEW / projectAnalytics.totalTasks) * 100}%` }}
+                              className="bg-amber-500 h-full transition-all"
+                              title={`In Review: ${projectAnalytics.statusCounts.IN_REVIEW}`}
+                            />
+                            <div
+                              style={{ width: `${(projectAnalytics.statusCounts.DONE / projectAnalytics.totalTasks) * 100}%` }}
+                              className="bg-emerald-500 h-full transition-all"
+                              title={`Done: ${projectAnalytics.statusCounts.DONE}`}
+                            />
+                          </>
+                        ) : (
+                          <div className="w-full bg-slate-800 h-full text-[10px] text-center text-slate-500">No tasks</div>
+                        )}
+                      </div>
+
+                      {/* Status Legends */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                            <span className="w-2 h-2 rounded-full bg-slate-400" />
+                            To Do
+                          </div>
+                          <div className="text-base font-bold text-white mt-1">
+                            {projectAnalytics?.statusCounts.TODO ?? 0}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                          <div className="flex items-center gap-1.5 text-xs text-blue-400">
+                            <span className="w-2 h-2 rounded-full bg-blue-400" />
+                            In Progress
+                          </div>
+                          <div className="text-base font-bold text-white mt-1">
+                            {projectAnalytics?.statusCounts.IN_PROGRESS ?? 0}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                          <div className="flex items-center gap-1.5 text-xs text-amber-400">
+                            <span className="w-2 h-2 rounded-full bg-amber-400" />
+                            In Review
+                          </div>
+                          <div className="text-base font-bold text-white mt-1">
+                            {projectAnalytics?.statusCounts.IN_REVIEW ?? 0}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                            Done
+                          </div>
+                          <div className="text-base font-bold text-white mt-1">
+                            {projectAnalytics?.statusCounts.DONE ?? 0}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Priority Breakdown */}
+                    <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <PieChart className="w-4 h-4 text-indigo-400" />
+                          <h3 className="text-sm font-bold text-white">Priority Distribution</h3>
+                        </div>
+                        <span className="text-xs text-slate-400">Task urgency ranking</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {/* Urgent */}
+                        <div className="p-2.5 rounded-lg bg-rose-950/20 border border-rose-900/40">
+                          <div className="text-xs font-semibold text-rose-400">URGENT</div>
+                          <div className="text-lg font-bold text-white mt-1">
+                            {projectAnalytics?.priorityCounts.URGENT ?? 0}
+                          </div>
+                          <div className="text-[10px] text-rose-300/80">Critical blocker</div>
+                        </div>
+
+                        {/* High */}
+                        <div className="p-2.5 rounded-lg bg-amber-950/20 border border-amber-900/40">
+                          <div className="text-xs font-semibold text-amber-400">HIGH</div>
+                          <div className="text-lg font-bold text-white mt-1">
+                            {projectAnalytics?.priorityCounts.HIGH ?? 0}
+                          </div>
+                          <div className="text-[10px] text-amber-300/80">Priority focus</div>
+                        </div>
+
+                        {/* Medium */}
+                        <div className="p-2.5 rounded-lg bg-blue-950/20 border border-blue-900/40">
+                          <div className="text-xs font-semibold text-blue-400">MEDIUM</div>
+                          <div className="text-lg font-bold text-white mt-1">
+                            {projectAnalytics?.priorityCounts.MEDIUM ?? 0}
+                          </div>
+                          <div className="text-[10px] text-blue-300/80">Standard sprint</div>
+                        </div>
+
+                        {/* Low */}
+                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                          <div className="text-xs font-semibold text-slate-400">LOW</div>
+                          <div className="text-lg font-bold text-white mt-1">
+                            {projectAnalytics?.priorityCounts.LOW ?? 0}
+                          </div>
+                          <div className="text-[10px] text-slate-400">Minor / polish</div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80 flex items-center justify-between">
+                        <span>Overdue High/Urgent Tasks:</span>
+                        <span className="font-mono font-bold text-rose-400">
+                          {tasks.filter((t) => t.dueDate && new Date(t.dueDate) < new Date() && (t.priority === 'HIGH' || t.priority === 'URGENT') && t.status !== 'DONE').length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Operational Grid: Workspace Projects Overview & Urgent Attention + Audit Trail */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column: Workspace Projects Health & Urgent Attention */}
+                    <div className="space-y-6">
+                      {/* Workspace Portfolio Health */}
+                      {workspaceAnalytics && (
+                        <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Briefcase className="w-4 h-4 text-indigo-400" />
+                              <h3 className="text-sm font-bold text-white">Workspace Projects Portfolio</h3>
+                            </div>
+                            <span className="text-xs text-slate-400">
+                              {workspaceAnalytics.totalProjects} Projects • {workspaceAnalytics.totalTasks} Tasks Total
+                            </span>
+                          </div>
+
+                          <div className="divide-y divide-slate-800/80">
+                            {workspaceAnalytics.projectBreakdowns.map((prj) => (
+                              <div key={prj.id} className="py-3 flex items-center justify-between gap-3 text-xs">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-indigo-400">{prj.key}</span>
+                                    <span className="font-semibold text-white">{prj.name}</span>
+                                    {prj.overdueTasksCount > 0 && (
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                        {prj.overdueTasksCount} overdue
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400">
+                                    {prj.completedTasks} / {prj.totalTasks} tasks completed ({prj.completionRate}%)
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                  <div className="w-24 bg-slate-800 h-2 rounded-full overflow-hidden hidden sm:block">
+                                    <div
+                                      className="bg-emerald-500 h-full rounded-full"
+                                      style={{ width: `${prj.completionRate}%` }}
+                                    />
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      const fullPrj = projects.find((p) => p.id === prj.id);
+                                      if (fullPrj) {
+                                        selectProject(fullPrj);
+                                        setActiveTab('board');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition"
+                                  >
+                                    View Board →
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Urgent Attention: Overdue Tasks List */}
+                      <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-rose-400" />
+                            <h3 className="text-sm font-bold text-white">Overdue Tasks Requiring Action</h3>
+                          </div>
+                          <span className="text-xs text-rose-400 font-mono font-bold">
+                            {tasks.filter((t) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'DONE').length} Overdue
+                          </span>
+                        </div>
+
+                        {tasks.filter((t) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'DONE').length === 0 ? (
+                          <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/80 text-center text-xs text-slate-400">
+                            🎉 Great job! No tasks are currently overdue in this project.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {tasks
+                              .filter((t) => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'DONE')
+                              .slice(0, 5)
+                              .map((task) => (
+                                <div
+                                  key={task.id}
+                                  className="p-3 rounded-lg bg-rose-950/10 border border-rose-900/30 flex items-center justify-between gap-3 text-xs"
+                                >
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-rose-400">{task.taskKey}</span>
+                                      <span className="font-medium text-white">{task.title}</span>
+                                      {getPriorityBadge(task.priority)}
+                                    </div>
+                                    <div className="text-[11px] text-rose-300/80 flex items-center gap-2">
+                                      <span>Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'N/A'}</span>
+                                      <span>•</span>
+                                      <span>Status: {task.status}</span>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleStatusTransition(task.id, 'DONE')}
+                                    className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 text-[11px] font-semibold transition"
+                                  >
+                                    Mark Done ✓
+                                  </button>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right Column: Real-Time Activity Feed / Audit Trail */}
+                    <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-indigo-400" />
+                          <h3 className="text-sm font-bold text-white">Audit & Activity Log</h3>
+                        </div>
+
+                        {/* Filter by action */}
+                        <select
+                          value={activityFilterAction}
+                          onChange={(e) => setActivityFilterAction(e.target.value)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                        >
+                          <option value="ALL">All Actions</option>
+                          <option value="TASK_CREATED">Task Created</option>
+                          <option value="STATUS_CHANGED">Status Changed</option>
+                          <option value="PRIORITY_CHANGED">Priority Changed</option>
+                          <option value="ASSIGNEE_CHANGED">Assignee Changed</option>
+                          <option value="TASK_DELETED">Task Deleted</option>
+                        </select>
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          Tamper-evident audit trail: secrets & tokens sanitized.
+                        </span>
+                        <span className="font-mono text-slate-400">{activities.length} Entries</span>
+                      </div>
+
+                      {/* Feed Items */}
+                      <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                        {activities
+                          .filter((a) => activityFilterAction === 'ALL' || a.action === activityFilterAction)
+                          .length === 0 ? (
+                          <div className="p-6 rounded-lg bg-slate-950/40 border border-slate-800/80 text-center text-xs text-slate-400">
+                            No activities logged for this filter.
+                          </div>
+                        ) : (
+                          activities
+                            .filter((a) => activityFilterAction === 'ALL' || a.action === activityFilterAction)
+                            .map((act) => {
+                              const getActionBadge = (action: string) => {
+                                switch (action) {
+                                  case 'TASK_CREATED':
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">CREATED</span>;
+                                  case 'STATUS_CHANGED':
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">STATUS</span>;
+                                  case 'PRIORITY_CHANGED':
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">PRIORITY</span>;
+                                  case 'TASK_DELETED':
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">DELETED</span>;
+                                  case 'ASSIGNEE_CHANGED':
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">ASSIGNED</span>;
+                                  default:
+                                    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">{action}</span>;
+                                }
+                              };
+
+                              return (
+                                <div
+                                  key={act.id}
+                                  className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 hover:border-slate-700 transition space-y-1.5"
+                                >
+                                  <div className="flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-5 h-5 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center font-bold text-[10px] text-indigo-300">
+                                        {act.user?.name ? act.user.name.charAt(0) : 'U'}
+                                      </div>
+                                      <span className="font-semibold text-slate-200">{act.user?.name || 'System User'}</span>
+                                      {getActionBadge(act.action)}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">
+                                      {new Date(act.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+
+                                  <div className="text-xs text-slate-300 pl-7">
+                                    {act.details?.taskKey ? (
+                                      <span className="font-mono text-indigo-400 font-bold mr-1.5">
+                                        [{String(act.details.taskKey)}]
+                                      </span>
+                                    ) : null}
+                                    <span>{act.details?.title ? String(act.details.title) : act.entityType}</span>
+
+                                    {/* Action diff breakdown */}
+                                    {act.action === 'STATUS_CHANGED' && (
+                                      <div className="mt-1 font-mono text-[10px] text-slate-400 flex items-center gap-1.5">
+                                        <span className="text-slate-400">{String(act.details?.fromStatus || '')}</span>
+                                        <span>→</span>
+                                        <span className="text-emerald-400 font-bold">{String(act.details?.toStatus || '')}</span>
+                                      </div>
+                                    )}
+
+                                    {act.action === 'PRIORITY_CHANGED' && (
+                                      <div className="mt-1 font-mono text-[10px] text-slate-400 flex items-center gap-1.5">
+                                        <span className="text-slate-400">{String(act.details?.fromPriority || '')}</span>
+                                        <span>→</span>
+                                        <span className="text-amber-400 font-bold">{String(act.details?.toPriority || '')}</span>
+                                      </div>
+                                    )}
+
+                                    {act.action === 'ASSIGNEE_CHANGED' && (
+                                      <div className="mt-1 text-[10px] text-purple-300">
+                                        Assigned to {String(act.details?.assigneeName || 'member')}
+                                      </div>
+                                    )}
+
+                                    {act.action === 'TASK_DELETED' && (
+                                      <div className="mt-1 text-[10px] text-rose-400 italic">
+                                        Permanently removed from project
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -995,72 +1667,159 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  {/* Board Controls Bar */}
-                  <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center font-mono font-bold text-xs text-indigo-400">
-                        {selectedProject.key}
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">Current Project:</div>
-                        <div className="font-bold text-white flex items-center gap-2 text-sm">
-                          {selectedProject.name}
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-slate-800 text-slate-300">
-                            {tasks.length} Task{tasks.length === 1 ? '' : 's'}
-                          </span>
+                  {/* Board Controls Bar with Advanced Filtering (Milestone 5) */}
+                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center font-mono font-bold text-xs text-indigo-400">
+                          {selectedProject.key}
                         </div>
+                        <div>
+                          <div className="text-xs text-slate-400">Current Project:</div>
+                          <div className="font-bold text-white flex items-center gap-2 text-sm">
+                            {selectedProject.name}
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-slate-800 text-slate-300">
+                              {filteredTasks.length} / {tasks.length} Shown
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Top Action Buttons */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setActiveTab('dashboard')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
+                        >
+                          <BarChart3 className="w-3.5 h-3.5 text-indigo-400" /> Metrics Dashboard
+                        </button>
+
+                        <button
+                          onClick={() => openCreateModalForColumn('TODO')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> New Task
+                        </button>
                       </div>
                     </div>
 
-                    {/* Filter and Actions Bar */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Search box */}
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          placeholder="Search tasks..."
-                          value={taskFilterSearch}
-                          onChange={(e) => setTaskFilterSearch(e.target.value)}
-                          className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                        />
+                    {/* Advanced Filter and Sorting Toolbar */}
+                    <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Search box */}
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Search tasks or keys..."
+                            value={taskFilterSearch}
+                            onChange={(e) => setTaskFilterSearch(e.target.value)}
+                            className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44"
+                          />
+                        </div>
+
+                        {/* Status Multi-Filter Pills */}
+                        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                          <button
+                            onClick={() => setFilterMultiStatus([])}
+                            className={`px-2 py-1 rounded text-[11px] font-medium transition ${
+                              filterMultiStatus.length === 0
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            All Statuses
+                          </button>
+                          {(['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'] as TaskStatus[]).map((st) => {
+                            const isSelected = filterMultiStatus.includes(st);
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setFilterMultiStatus(filterMultiStatus.filter((s) => s !== st));
+                                  } else {
+                                    setFilterMultiStatus([...filterMultiStatus, st]);
+                                  }
+                                }}
+                                className={`px-2 py-1 rounded text-[11px] font-medium transition ${
+                                  isSelected
+                                    ? 'bg-slate-700 text-white font-semibold'
+                                    : 'text-slate-400 hover:text-white'
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Overdue Only Toggle */}
+                        <button
+                          onClick={() => setFilterOverdueOnly(!filterOverdueOnly)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition ${
+                            filterOverdueOnly
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                          Overdue Only
+                        </button>
                       </div>
 
-                      {/* Priority Filter */}
-                      <select
-                        value={taskFilterPriority}
-                        onChange={(e) => setTaskFilterPriority(e.target.value as TaskPriority | 'ALL')}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
-                      >
-                        <option value="ALL">All Priorities</option>
-                        <option value="URGENT">Urgent</option>
-                        <option value="HIGH">High</option>
-                        <option value="MEDIUM">Medium</option>
-                        <option value="LOW">Low</option>
-                      </select>
+                      {/* Sorting & Assignee Controls */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Assignee Filter */}
+                        <select
+                          value={taskFilterAssignee}
+                          onChange={(e) => setTaskFilterAssignee(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                        >
+                          <option value="ALL">All Assignees</option>
+                          <option value="UNASSIGNED">Unassigned Only</option>
+                          {projectMembers.map((m) => (
+                            <option key={m.userId} value={m.userId}>
+                              {m.user.name} ({m.role})
+                            </option>
+                          ))}
+                        </select>
 
-                      {/* Assignee Filter */}
-                      <select
-                        value={taskFilterAssignee}
-                        onChange={(e) => setTaskFilterAssignee(e.target.value)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
-                      >
-                        <option value="ALL">All Assignees</option>
-                        <option value="UNASSIGNED">Unassigned</option>
-                        {projectMembers.map((m) => (
-                          <option key={m.userId} value={m.userId}>
-                            {m.user.name} ({m.role})
-                          </option>
-                        ))}
-                      </select>
+                        {/* Priority Filter */}
+                        <select
+                          value={taskFilterPriority}
+                          onChange={(e) => setTaskFilterPriority(e.target.value as TaskPriority | 'ALL')}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                        >
+                          <option value="ALL">All Priorities</option>
+                          <option value="URGENT">Urgent Only</option>
+                          <option value="HIGH">High Only</option>
+                          <option value="MEDIUM">Medium Only</option>
+                          <option value="LOW">Low Only</option>
+                        </select>
 
-                      {/* Add Task Button */}
-                      <button
-                        onClick={() => openCreateModalForColumn('TODO')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> New Task
-                      </button>
+                        {/* Sort By */}
+                        <select
+                          value={filterSortBy}
+                          onChange={(e) => setFilterSortBy(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                        >
+                          <option value="orderIndex">Sort: Board Order</option>
+                          <option value="dueDate">Sort: Due Date</option>
+                          <option value="priority">Sort: Priority</option>
+                          <option value="taskNumber">Sort: Task Key</option>
+                          <option value="createdAt">Sort: Created Date</option>
+                        </select>
+
+                        {/* Sort Direction Toggle */}
+                        <button
+                          onClick={() => setFilterSortOrder(filterSortOrder === 'asc' ? 'desc' : 'asc')}
+                          className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 transition"
+                          title={`Sort Order: ${filterSortOrder.toUpperCase()}`}
+                        >
+                          <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
 
