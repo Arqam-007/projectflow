@@ -164,11 +164,30 @@ npm run dev
 
 ---
 
+---
+
+## Windows PowerShell Setup Guide
+
+For Windows developers using PowerShell and Docker Desktop, see the dedicated step-by-step guide:
+👉 [docs/WINDOWS_SETUP_GUIDE.md](docs/WINDOWS_SETUP_GUIDE.md)
+
+---
+
 ## Running Automated Tests
 
-To run the complete test suite (88 integration and unit tests across 9 test suites):
+To run the unit and API integration test suite (98 tests across 9 test suites):
 ```bash
-npm run test
+npm test
+```
+
+To run the dedicated PostgreSQL integration tests (requires Docker PostgreSQL running):
+```bash
+npm run test:pg
+```
+
+To run all suites together (104 tests total):
+```bash
+npm run test:all
 ```
 
 To run strict TypeScript compilation check:
