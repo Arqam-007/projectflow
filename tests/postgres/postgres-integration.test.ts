@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { PrismaClient, TaskStatus, TaskPriority, Role } from '@prisma/client';
+import { PrismaClient, Prisma, TaskStatus, TaskPriority, Role } from '@prisma/client';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -223,7 +223,8 @@ describe('PostgreSQL Real Integration Tests', () => {
     } catch (err: unknown) {
       duplicateRejected = true;
       // Prisma P2002 corresponds to PostgreSQL unique violation (code 23505)
-      expect(String(err)).toContain('Unique constraint failed');
+      expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((err as Prisma.PrismaClientKnownRequestError).code).toBe('P2002');
     }
     expect(duplicateRejected).toBe(true);
   });
@@ -395,7 +396,9 @@ describe('PostgreSQL Real Integration Tests', () => {
       });
     } catch (err: unknown) {
       invalidFkCaught = true;
-      expect(String(err)).toContain('Foreign key constraint failed');
+      // Prisma P2003 corresponds to PostgreSQL foreign key constraint violation (code 23503)
+      expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((err as Prisma.PrismaClientKnownRequestError).code).toBe('P2003');
     }
     expect(invalidFkCaught).toBe(true);
 
@@ -407,7 +410,9 @@ describe('PostgreSQL Real Integration Tests', () => {
       });
     } catch (err: unknown) {
       restrictCaught = true;
-      expect(String(err)).toContain('Foreign key constraint failed');
+      // Prisma P2003 corresponds to PostgreSQL foreign key restrict violation (code 23503)
+      expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((err as Prisma.PrismaClientKnownRequestError).code).toBe('P2003');
     }
     expect(restrictCaught).toBe(true);
 

@@ -14,7 +14,7 @@ RUN npm ci
 COPY . .
 
 # Generate Prisma Client & Build Vite client assets
-RUN npx prisma generate
+RUN npm run prisma:generate
 RUN npm run build
 
 # Production runtime stage
