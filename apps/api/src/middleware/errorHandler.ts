@@ -37,6 +37,35 @@ export function errorHandler(
     return;
   }
 
+  // Handle Express body-parser SyntaxError (e.g., malformed JSON)
+  if (err instanceof SyntaxError && 'status' in err && (err as { status?: number }).status === 400) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Malformed JSON payload in request body',
+        timestamp,
+      },
+    });
+    return;
+  }
+
+  // Handle HTTP errors with client status code (e.g., 413 Payload Too Large)
+  if (err && typeof err === 'object' && ('status' in err || 'statusCode' in err)) {
+    const status = Number((err as { status?: number; statusCode?: number }).status || (err as { statusCode?: number }).statusCode);
+    if (status >= 400 && status < 500) {
+      res.status(status).json({
+        success: false,
+        error: {
+          code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST',
+          message: (err as { message?: string }).message || 'Invalid client request',
+          timestamp,
+        },
+      });
+      return;
+    }
+  }
+
   // Fallback for unhandled unexpected exceptions
   console.error('[UNHANDLED EXCEPTION]', {
     path: req.originalUrl,

@@ -3,6 +3,7 @@ import { structuredLogger } from './middleware/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { NotFoundError } from './utils/errors.js';
 import v1Routes from './routes/v1/index.js';
+import { securityHeaders } from './middleware/security.js';
 import { config } from './config/index.js';
 
 export function createApp(): Express {
@@ -10,6 +11,7 @@ export function createApp(): Express {
 
   // Basic security and request parsing
   app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

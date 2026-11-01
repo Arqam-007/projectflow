@@ -47,12 +47,22 @@ jobs:
       - name: TypeScript type checking
         run: npm run lint
 
-      - name: Run automated test suite
-        run: npm run test
+      - name: Apply Prisma migrations to PostgreSQL
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectflow_test?schema=public
+
+      - name: Run automated test suites (Unit, API & PostgreSQL)
+        run: npm run test:all
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectflow_test?schema=public
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projectflow_test?schema=public
+          STRICT_POSTGRES: 'true'
           JWT_SECRET: ci-test-environment-secret-min-32-chars-long
 
       - name: Build client assets
         run: npm run build
+
+      - name: Verify Docker production container build
+        run: docker build -t projectflow:ci .

@@ -165,18 +165,43 @@ All migrations have been successfully applied.
 
 ---
 
-### 8. Run Automated Tests
+### 8. Seed Development Database (Optional)
+Populate your local database with sample users, workspace, projects, and tasks:
 
-#### A. Run Unit & In-Memory API Test Suite (98 Tests):
+```powershell
+npm run prisma:seed
+```
+
+*Expected output:*
+```text
+[ProjectFlow Seed] Starting database seeding...
+=============================================================
+ [ProjectFlow] Database Seeding Completed Successfully
+=============================================================
+ Available Seeded Test Accounts (Password: Password123!):
+  1. alex.owner@projectflow.local   (Role: Workspace & Project OWNER)
+  2. sam.admin@projectflow.local     (Role: ADMIN)
+  3. jordan.member@projectflow.local (Role: MEMBER)
+  4. taylor.viewer@projectflow.local (Role: VIEWER)
+ Sample Workspace: Acme Engineering (slug: acme-eng)
+ Sample Projects:  Core Platform (CORE), Mobile Application (MOB)
+=============================================================
+```
+
+---
+
+### 9. Run Automated Tests
+
+#### A. Run Unit & In-Memory API Test Suite (107 Tests):
 ```powershell
 npm test
 ```
 
 *Expected output:*
 ```text
- Test Files  9 passed (9)
-      Tests  98 passed (98)
-   Duration  ~25s
+ Test Files  10 passed (10)
+      Tests  107 passed (107)
+   Duration  ~30s
 ```
 
 #### B. Run Dedicated Real PostgreSQL Integration Tests (6 Real DB Tests):
@@ -198,20 +223,20 @@ npm run test:pg
       Tests  6 passed (6)
 ```
 
-#### C. Run All Suites Together (104 Tests Total):
+#### C. Run All Suites Together (113 Tests Total):
 ```powershell
 npm run test:all
 ```
 
 *Expected output:*
 ```text
- Test Files  10 passed (10)
-      Tests  104 passed (104)
+ Test Files  11 passed (11)
+      Tests  113 passed (113)
 ```
 
 ---
 
-### 9. Start the ProjectFlow Application
+### 10. Start the ProjectFlow Application
 Launch the dev server running React 19 + Express API:
 
 ```powershell

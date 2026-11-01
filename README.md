@@ -16,8 +16,18 @@
 - **Authorization**: Role-Based Access Control (RBAC) with Owner, Admin, Member, Viewer permissions
 - **Database & ORM**: PostgreSQL 16, Prisma ORM
 - **Validation**: Zod (Strict runtime schema validation for request payloads, queries, and environment)
-- **Testing**: Vitest, Supertest (88 passing integration & unit tests across 9 suites)
+- **Testing**: Vitest, Supertest (107 passing unit/API tests across 10 suites; 113 total with PostgreSQL integration tests)
+- **Security & Hardening**: Sliding-window rate limiting, HTTP defense-in-depth security headers, sanitized audit logging, production seeding guards
 - **DevOps & Containers**: Docker, Docker Compose, GitHub Actions CI
+
+---
+
+## Documentation & Specifications
+
+- 📘 **[Architecture & Specifications](docs/architecture.md)** — Architectural design, RBAC matrix, and state machine specifications.
+- 📋 **[OpenAPI 3.0 API Specification](docs/openapi.json)** — Complete OpenAPI 3.0 contract for all 24+ REST endpoints.
+- 🚀 **[Production Deployment & Operations Guide](docs/PRODUCTION_DEPLOYMENT.md)** — Docker multi-stage builds, environment checklist, and PostgreSQL backup/restore.
+- 💻 **[Windows PowerShell Setup Guide](docs/WINDOWS_SETUP_GUIDE.md)** — Local setup commands for Windows developers.
 
 ---
 
@@ -30,7 +40,7 @@ projectflow/
 │   └── api/src/              # Backend Express REST API
 │       ├── config/           # Zod-validated environment config
 │       ├── controllers/      # Route controllers (tasks, analytics, activity, projects, workspaces, auth, health)
-│       ├── middleware/       # JWT auth guard, RBAC guards (requireTaskRole, requireProjectRole), validation, logging
+│       ├── middleware/       # JWT auth, RBAC guards, rate limiter, security headers, validation, logging
 │       ├── routes/v1/        # Versioned route registry (/api/v1/{tasks,analytics,activity,projects,workspaces,auth,health})
 │       ├── services/         # TaskService, ActivityService, ProjectService, WorkspaceService, AuthService, TokenService
 │       ├── repositories/     # TaskRepo, ActivityRepo, ProjectRepo, WorkspaceRepo, UserRepo (Prisma & Memory adapters)
@@ -39,24 +49,26 @@ projectflow/
 │   └── shared/src/           # Shared domain models & Zod validation schemas
 ├── prisma/
 │   ├── schema.prisma         # PostgreSQL schema definition with Prisma (Task model, ActivityLog, relations)
+│   ├── seed.ts               # Idempotent development database seed script
 │   └── migrations/           # Versioned SQL migrations
 ├── tests/
-│   ├── api/analytics.test.ts  # Supertest project & workspace analytics aggregation tests (6 tests)
-│   ├── api/activity.test.ts   # Supertest audit logging & sanitization tests (7 tests)
-│   ├── api/filters.test.ts    # Supertest multi-attribute filtering & deterministic sorting tests (6 tests)
+│   ├── api/security.test.ts   # Rate limiting, security headers, malformed payload & seed guard tests (9 tests)
+│   ├── api/analytics.test.ts  # Supertest project & workspace analytics aggregation tests (8 tests)
+│   ├── api/activity.test.ts   # Supertest audit logging & sanitization tests (11 tests)
+│   ├── api/filters.test.ts    # Supertest multi-attribute filtering & deterministic sorting tests (10 tests)
 │   ├── api/tasks.test.ts      # Supertest task management, concurrency & state machine tests (30 tests)
 │   ├── api/projects.test.ts   # Supertest project & membership integration tests (10 tests)
 │   ├── api/workspaces.test.ts # Supertest workspace & RBAC integration tests (10 tests)
 │   ├── api/auth.test.ts       # Supertest authentication & security tests (13 tests)
 │   ├── api/health.test.ts     # Supertest health endpoint tests (2 tests)
-│   └── unit/validation.test.ts # Zod schema validation unit tests (4 tests)
-├── docs/
-│   └── architecture.md       # Detailed technical architecture reference
+│   ├── unit/validation.test.ts # Zod schema validation unit tests (4 tests)
+│   └── postgres/              # Dedicated PostgreSQL 16 real database tests (6 tests)
+├── docs/                     # OpenAPI 3.0 spec, Production Deployment, Architecture & Windows Guide
 ├── .github/workflows/
-│   └── ci.yml                # Automated CI for type checking, tests, and build
+│   └── ci.yml                # Automated CI for linting, database migrations, full test suite, build, and Docker
 ├── docker-compose.yml        # PostgreSQL 16 container setup
 ├── Dockerfile                # Multi-stage production container build
-├── server.ts                 # Single-process fullstack dev server (Express + Vite)
+├── server.ts                 # Fullstack runner (Express API + Vite static client)
 ├── .env.example              # Environment variables template
 └── package.json              # Project dependencies and operational scripts
 ```
@@ -173,9 +185,24 @@ For Windows developers using PowerShell and Docker Desktop, see the dedicated st
 
 ---
 
+## Database Seeding
+
+To populate your local PostgreSQL database with realistic development data (4 users, "Acme Engineering" workspace, 2 projects, 9 tasks across all statuses and priorities, and audit trail):
+```bash
+npm run prisma:seed
+```
+
+**Seeded Development Accounts (Password: `Password123!`):**
+- `alex.owner@projectflow.local` (Workspace & Project Owner)
+- `sam.admin@projectflow.local` (Project Owner & Admin)
+- `jordan.member@projectflow.local` (Member & Assignee)
+- `taylor.viewer@projectflow.local` (Viewer)
+
+---
+
 ## Running Automated Tests
 
-To run the unit and API integration test suite (98 tests across 9 test suites):
+To run the unit and API integration test suite (107 tests across 10 test suites):
 ```bash
 npm test
 ```
@@ -185,7 +212,7 @@ To run the dedicated PostgreSQL integration tests (requires Docker PostgreSQL ru
 npm run test:pg
 ```
 
-To run all suites together (104 tests total):
+To run all suites together (113 tests total):
 ```bash
 npm run test:all
 ```
@@ -204,4 +231,4 @@ npm run lint
 - [x] **Milestone 3**: Workspaces, Project Creation and Management, Project Membership, and RBAC
 - [x] **Milestone 4**: Task Management, Priorities, Assignees, and Interactive Kanban Board
 - [x] **Milestone 5**: Executive Analytics Dashboard, Task Statistics, Activity Logging & Advanced Filtering
-- [ ] **Milestone 6**: Automated Test Coverage Expansion & Portfolio Documentation Finalization
+- [x] **Milestone 6**: Automated Test Coverage Expansion & Portfolio Documentation Finalization
