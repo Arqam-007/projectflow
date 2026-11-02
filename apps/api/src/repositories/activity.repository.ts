@@ -109,8 +109,11 @@ export function sanitizeActivityDetails(
 
 export class PrismaActivityRepository implements IActivityRepository {
   private prisma: PrismaClient;
-  private fallbackMemoryRepo = new MemoryActivityRepository();
   private hasLoggedFallback = false;
+
+  private get fallbackMemoryRepo(): MemoryActivityRepository {
+    return fallbackMemoryActivityRepo;
+  }
 
   constructor(prismaInstance?: PrismaClient) {
     this.prisma = prismaInstance || new PrismaClient();
@@ -121,14 +124,21 @@ export class PrismaActivityRepository implements IActivityRepository {
     const msg = String(err);
     return (
       msg.includes("Can't reach database server") ||
+      msg.includes('P1000') ||
       msg.includes('P1001') ||
+      msg.includes('P1002') ||
+      msg.includes('P1003') ||
+      msg.includes('P1017') ||
       msg.includes('ConnectionRefused') ||
-      msg.includes('ECONNREFUSED')
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('InitializationError')
     );
   }
 
   private handleDbError(err: unknown) {
-    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+    if (config.NODE_ENV === 'production' || (process.env.STRICT_POSTGRES === 'true' && process.env.NODE_ENV === 'test')) {
       throw err;
     }
     if (!this.hasLoggedFallback) {
@@ -336,10 +346,16 @@ export class MemoryActivityRepository implements IActivityRepository {
     return { items, total };
   }
 
+  public seedActivity(activity: ActivityRecord): void {
+    this.logs.unshift({ ...activity });
+  }
+
   public async clear(): Promise<void> {
     this.logs = [];
   }
 }
+
+export const fallbackMemoryActivityRepo = new MemoryActivityRepository();
 
 const usePrisma = Boolean(
   config.NODE_ENV !== 'test' &&
@@ -349,7 +365,7 @@ const usePrisma = Boolean(
 
 export let activityRepository: IActivityRepository = usePrisma
   ? new PrismaActivityRepository()
-  : new MemoryActivityRepository();
+  : fallbackMemoryActivityRepo;
 
 export function setActivityRepository(repo: IActivityRepository): void {
   activityRepository = repo;

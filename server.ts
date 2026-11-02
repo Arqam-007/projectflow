@@ -12,6 +12,16 @@ async function startServer() {
 
   if (!isProduction) {
     // In development (including Google AI Studio live preview):
+    process.env.STRICT_POSTGRES = 'false';
+
+    // Seed in-memory store so default users, workspaces, and projects are available if local PostgreSQL container is not running
+    try {
+      const { seedSandboxMemory } = await import('./apps/api/src/services/sandbox-seed.js');
+      await seedSandboxMemory();
+    } catch (seedErr) {
+      console.warn('[ProjectFlow] Sandbox memory seeding error:', seedErr);
+    }
+
     // Mount Vite dev server middlewares to serve React SPA on port 3000
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

@@ -33,8 +33,11 @@ export interface IProjectRepository {
 
 export class PrismaProjectRepository implements IProjectRepository {
   private prisma: PrismaClient;
-  private fallbackMemoryRepo = new MemoryProjectRepository();
   private hasLoggedFallback = false;
+
+  private get fallbackMemoryRepo(): MemoryProjectRepository {
+    return fallbackMemoryProjectRepo;
+  }
 
   constructor(prismaInstance?: PrismaClient) {
     this.prisma = prismaInstance || new PrismaClient();
@@ -45,14 +48,21 @@ export class PrismaProjectRepository implements IProjectRepository {
     const msg = String(err);
     return (
       msg.includes("Can't reach database server") ||
+      msg.includes('P1000') ||
       msg.includes('P1001') ||
+      msg.includes('P1002') ||
+      msg.includes('P1003') ||
+      msg.includes('P1017') ||
       msg.includes('ConnectionRefused') ||
-      msg.includes('ECONNREFUSED')
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('InitializationError')
     );
   }
 
   private notifyFallback(err?: unknown) {
-    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+    if (config.NODE_ENV === 'production' || (process.env.STRICT_POSTGRES === 'true' && process.env.NODE_ENV === 'test')) {
       throw err || new Error('Database connection failed');
     }
     if (!this.hasLoggedFallback) {
@@ -453,11 +463,20 @@ export class MemoryProjectRepository implements IProjectRepository {
     return count;
   }
 
+  public seedProject(project: ProjectRecord, membersList: ProjectMemberRecord[]): void {
+    this.projects.set(project.id, { ...project });
+    for (const m of membersList) {
+      this.members.set(`${project.id}:${m.userId}`, { ...m });
+    }
+  }
+
   public async clear(): Promise<void> {
     this.projects.clear();
     this.members.clear();
   }
 }
+
+export const fallbackMemoryProjectRepo = new MemoryProjectRepository();
 
 const usePrisma = Boolean(
   config.NODE_ENV !== 'test' &&
@@ -467,7 +486,7 @@ const usePrisma = Boolean(
 
 export let projectRepository: IProjectRepository = usePrisma
   ? new PrismaProjectRepository()
-  : new MemoryProjectRepository();
+  : fallbackMemoryProjectRepo;
 
 export function setProjectRepository(repo: IProjectRepository): void {
   projectRepository = repo;

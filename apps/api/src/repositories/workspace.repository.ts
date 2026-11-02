@@ -33,8 +33,11 @@ export interface IWorkspaceRepository {
 
 export class PrismaWorkspaceRepository implements IWorkspaceRepository {
   private prisma: PrismaClient;
-  private fallbackMemoryRepo = new MemoryWorkspaceRepository();
   private hasLoggedFallback = false;
+
+  private get fallbackMemoryRepo(): MemoryWorkspaceRepository {
+    return fallbackMemoryWorkspaceRepo;
+  }
 
   constructor(prismaInstance?: PrismaClient) {
     this.prisma = prismaInstance || new PrismaClient();
@@ -45,14 +48,21 @@ export class PrismaWorkspaceRepository implements IWorkspaceRepository {
     const msg = String(err);
     return (
       msg.includes("Can't reach database server") ||
+      msg.includes('P1000') ||
       msg.includes('P1001') ||
+      msg.includes('P1002') ||
+      msg.includes('P1003') ||
+      msg.includes('P1017') ||
       msg.includes('ConnectionRefused') ||
-      msg.includes('ECONNREFUSED')
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('InitializationError')
     );
   }
 
   private notifyFallback(err?: unknown) {
-    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+    if (config.NODE_ENV === 'production' || (process.env.STRICT_POSTGRES === 'true' && process.env.NODE_ENV === 'test')) {
       throw err || new Error('Database connection failed');
     }
     if (!this.hasLoggedFallback) {
@@ -445,11 +455,20 @@ export class MemoryWorkspaceRepository implements IWorkspaceRepository {
     return count;
   }
 
+  public seedWorkspace(workspace: WorkspaceRecord, membersList: WorkspaceMemberRecord[]): void {
+    this.workspaces.set(workspace.id, { ...workspace });
+    for (const m of membersList) {
+      this.members.set(`${workspace.id}:${m.userId}`, { ...m });
+    }
+  }
+
   public async clear(): Promise<void> {
     this.workspaces.clear();
     this.members.clear();
   }
 }
+
+export const fallbackMemoryWorkspaceRepo = new MemoryWorkspaceRepository();
 
 const usePrisma = Boolean(
   config.NODE_ENV !== 'test' &&
@@ -459,7 +478,7 @@ const usePrisma = Boolean(
 
 export let workspaceRepository: IWorkspaceRepository = usePrisma
   ? new PrismaWorkspaceRepository()
-  : new MemoryWorkspaceRepository();
+  : fallbackMemoryWorkspaceRepo;
 
 export function setWorkspaceRepository(repo: IWorkspaceRepository): void {
   workspaceRepository = repo;

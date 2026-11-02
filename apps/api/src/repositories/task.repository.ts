@@ -88,8 +88,11 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 
 export class PrismaTaskRepository implements ITaskRepository {
   private prisma: PrismaClient;
-  private fallbackMemoryRepo = new MemoryTaskRepository();
   private hasLoggedFallback = false;
+
+  private get fallbackMemoryRepo(): MemoryTaskRepository {
+    return fallbackMemoryTaskRepo;
+  }
 
   constructor(prismaInstance?: PrismaClient) {
     this.prisma = prismaInstance || new PrismaClient();
@@ -100,14 +103,21 @@ export class PrismaTaskRepository implements ITaskRepository {
     const msg = String(err);
     return (
       msg.includes("Can't reach database server") ||
+      msg.includes('P1000') ||
       msg.includes('P1001') ||
+      msg.includes('P1002') ||
+      msg.includes('P1003') ||
+      msg.includes('P1017') ||
       msg.includes('ConnectionRefused') ||
-      msg.includes('ECONNREFUSED')
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('InitializationError')
     );
   }
 
   private handleDbError(err: unknown) {
-    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+    if (config.NODE_ENV === 'production' || (process.env.STRICT_POSTGRES === 'true' && process.env.NODE_ENV === 'test')) {
       throw err;
     }
     if (!this.hasLoggedFallback) {
@@ -711,11 +721,21 @@ export class MemoryTaskRepository implements ITaskRepository {
     this.tasks.delete(id);
   }
 
+  public seedTask(task: TaskRecord): void {
+    this.tasks.set(task.id, { ...task });
+    const current = this.projectTaskCounters.get(task.projectId) || 0;
+    if (task.taskNumber > current) {
+      this.projectTaskCounters.set(task.projectId, task.taskNumber);
+    }
+  }
+
   public async clear(): Promise<void> {
     this.tasks.clear();
     this.projectTaskCounters.clear();
   }
 }
+
+export const fallbackMemoryTaskRepo = new MemoryTaskRepository();
 
 const usePrisma = Boolean(
   config.NODE_ENV !== 'test' &&
@@ -725,7 +745,7 @@ const usePrisma = Boolean(
 
 export let taskRepository: ITaskRepository = usePrisma
   ? new PrismaTaskRepository()
-  : new MemoryTaskRepository();
+  : fallbackMemoryTaskRepo;
 
 export function setTaskRepository(repo: ITaskRepository): void {
   taskRepository = repo;

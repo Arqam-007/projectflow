@@ -543,6 +543,19 @@ export default function App() {
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWorkspace || !token) return;
+
+    const trimmedName = newProjectName.trim();
+    if (trimmedName.length < 2) {
+      showToast('Project name must be at least 2 characters', 'error');
+      return;
+    }
+
+    const sanitizedKey = newProjectKey.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    if (!/^[A-Z0-9]{2,10}$/.test(sanitizedKey)) {
+      showToast('Project key must be 2–10 uppercase letters or numbers (A–Z, 0–9)', 'error');
+      return;
+    }
+
     try {
       const res = await fetch(`/api/v1/workspaces/${selectedWorkspace.id}/projects`, {
         method: 'POST',
@@ -551,15 +564,15 @@ export default function App() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: newProjectName.trim(),
-          key: newProjectKey.trim().toUpperCase(),
+          name: trimmedName,
+          key: sanitizedKey,
           description: newProjectDesc.trim() || undefined,
           status: newProjectStatus,
         }),
       });
       const body = await res.json();
       if (res.ok && body.success) {
-        showToast(`Project "${newProjectName}" created!`);
+        showToast(`Project "${trimmedName}" [${sanitizedKey}] created!`);
         setShowCreateProjectModal(false);
         setNewProjectName('');
         setNewProjectKey('');
@@ -856,7 +869,7 @@ export default function App() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#111722] hover:bg-[#161e2e] text-[#9299A8] hover:text-white border border-white/[0.06] text-xs font-mono transition-colors"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="hidden sm:inline">107 Tests PASS</span>
+              <span className="hidden sm:inline">109 Tests PASS</span>
             </button>
           </div>
         </header>

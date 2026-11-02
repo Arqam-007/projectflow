@@ -19,8 +19,11 @@ export interface IUserRepository {
 
 export class PrismaUserRepository implements IUserRepository {
   private prisma: PrismaClient;
-  private fallbackMemoryRepo = new MemoryUserRepository();
   private hasLoggedFallback = false;
+
+  private get fallbackMemoryRepo(): MemoryUserRepository {
+    return fallbackMemoryUserRepo;
+  }
 
   constructor(prismaInstance?: PrismaClient) {
     this.prisma = prismaInstance || new PrismaClient();
@@ -31,14 +34,21 @@ export class PrismaUserRepository implements IUserRepository {
     const msg = String(err);
     return (
       msg.includes("Can't reach database server") ||
+      msg.includes('P1000') ||
       msg.includes('P1001') ||
+      msg.includes('P1002') ||
+      msg.includes('P1003') ||
+      msg.includes('P1017') ||
       msg.includes('ConnectionRefused') ||
-      msg.includes('ECONNREFUSED')
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('InitializationError')
     );
   }
 
   private notifyFallback(err: unknown) {
-    if (process.env.STRICT_POSTGRES === 'true' || config.NODE_ENV === 'production') {
+    if (config.NODE_ENV === 'production' || (process.env.STRICT_POSTGRES === 'true' && process.env.NODE_ENV === 'test')) {
       throw err;
     }
     if (!this.hasLoggedFallback) {
@@ -159,10 +169,16 @@ export class MemoryUserRepository implements IUserRepository {
     return { ...user };
   }
 
+  public seedUser(user: UserRecord): void {
+    this.users.set(user.id, { ...user });
+  }
+
   public async clear(): Promise<void> {
     this.users.clear();
   }
 }
+
+export const fallbackMemoryUserRepo = new MemoryUserRepository();
 
 // In test environment or if DATABASE_URL is not set/reachable, default to in-memory repository to guarantee fast, deterministic tests
 const usePrisma = Boolean(
@@ -173,7 +189,7 @@ const usePrisma = Boolean(
 
 export let userRepository: IUserRepository = usePrisma
   ? new PrismaUserRepository()
-  : new MemoryUserRepository();
+  : fallbackMemoryUserRepo;
 
 export function setUserRepository(repo: IUserRepository): void {
   userRepository = repo;

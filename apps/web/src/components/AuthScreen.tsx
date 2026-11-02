@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   CheckCircle2,
   Sparkles,
-  Zap,
 } from 'lucide-react';
 import { ThreeDWorkflowCanvas } from './ThreeDWorkflowCanvas.js';
 
@@ -31,8 +30,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('alex.owner@projectflow.local');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -42,13 +41,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     } else {
       onRegister(name, email, password);
     }
-  };
-
-  const fillDemoAccount = (demoEmail: string, demoName: string) => {
-    setEmail(demoEmail);
-    setPassword('Password123!');
-    if (demoName) setName(demoName);
-    onLogin(demoEmail, 'Password123!');
   };
 
   return (
@@ -225,55 +217,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
-          </div>
-
-          {/* 1-Click Demo Accounts Quick-Select */}
-          <div className="p-4 rounded-2xl bg-[#0B0E14] border border-white/[0.07] space-y-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-white">
-              <Zap className="w-3.5 h-3.5 text-[#D4FF24]" />
-              <span>Instant 1-Click Demo Profiles</span>
-            </div>
-            <p className="text-[11px] text-[#9299A8]">
-              Select a seeded profile to log in immediately and test RBAC permissions:
-            </p>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('alex.owner@projectflow.local', 'Alex Rivera')}
-                className="p-2.5 rounded-xl bg-[#111722] hover:bg-[#161e2e] border border-white/[0.06] hover:border-[#1558C9]/40 text-left transition-all"
-              >
-                <p className="text-xs font-semibold text-white truncate">Alex Rivera</p>
-                <p className="text-[10px] text-[#D4FF24] font-mono">Workspace OWNER</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('sam.admin@projectflow.local', 'Sam Chen')}
-                className="p-2.5 rounded-xl bg-[#111722] hover:bg-[#161e2e] border border-white/[0.06] hover:border-[#1558C9]/40 text-left transition-all"
-              >
-                <p className="text-xs font-semibold text-white truncate">Sam Chen</p>
-                <p className="text-[10px] text-[#1558C9] font-mono">Project ADMIN</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('jordan.member@projectflow.local', 'Jordan Taylor')}
-                className="p-2.5 rounded-xl bg-[#111722] hover:bg-[#161e2e] border border-white/[0.06] hover:border-[#1558C9]/40 text-left transition-all"
-              >
-                <p className="text-xs font-semibold text-white truncate">Jordan Taylor</p>
-                <p className="text-[10px] text-[#9299A8] font-mono">Team MEMBER</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('taylor.viewer@projectflow.local', 'Taylor Smith')}
-                className="p-2.5 rounded-xl bg-[#111722] hover:bg-[#161e2e] border border-white/[0.06] hover:border-[#1558C9]/40 text-left transition-all"
-              >
-                <p className="text-xs font-semibold text-white truncate">Taylor Smith</p>
-                <p className="text-[10px] text-[#9299A8] font-mono">Read-Only VIEWER</p>
-              </button>
-            </div>
           </div>
         </div>
       </div>
