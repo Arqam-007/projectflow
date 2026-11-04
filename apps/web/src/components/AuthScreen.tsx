@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layers,
   Lock,
@@ -32,14 +32,65 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Clear sensitive password states on component unmount
+  useEffect(() => {
+    return () => {
+      setPassword('');
+      setConfirmPassword('');
+    };
+  }, []);
+
+  const handleModeChange = (newMode: 'login' | 'register') => {
+    setMode(newMode);
+    // Instantly wipe all password states when switching between Sign In and Register
+    setPassword('');
+    setConfirmPassword('');
+    setShowPass(false);
+    setShowConfirmPass(false);
+    setClientError(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === 'login') {
-      onLogin(email, password);
-    } else {
-      onRegister(name, email, password);
+    setClientError(null);
+
+    if (mode === 'register') {
+      if (password.length < 8) {
+        setClientError('Password must be at least 8 characters long');
+        setPassword('');
+        setConfirmPassword('');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setClientError('Passwords do not match');
+        setPassword('');
+        setConfirmPassword('');
+        return;
+      }
+    }
+
+    // Capture temporary reference for the in-flight request
+    const passToSubmit = password;
+
+    // Immediately clear password from React component state
+    setPassword('');
+    setConfirmPassword('');
+
+    try {
+      if (mode === 'login') {
+        await onLogin(email.trim(), passToSubmit);
+      } else {
+        await onRegister(name.trim(), email.trim(), passToSubmit);
+      }
+    } finally {
+      // Guaranteed wipe of password values regardless of whether request succeeded or failed
+      setPassword('');
+      setConfirmPassword('');
     }
   };
 
@@ -107,7 +158,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <div className="flex items-center p-1 rounded-xl bg-[#111722] border border-white/[0.06]">
               <button
                 type="button"
-                onClick={() => setMode('login')}
+                onClick={() => handleModeChange('login')}
                 className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                   mode === 'login'
                     ? 'bg-[#1558C9] text-white shadow-md'
@@ -118,7 +169,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setMode('register')}
+                onClick={() => handleModeChange('register')}
                 className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                   mode === 'register'
                     ? 'bg-[#1558C9] text-white shadow-md'
@@ -141,9 +192,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </div>
 
             {/* Error or Success Banner */}
-            {authError && (
-              <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">
-                {authError}
+            {(clientError || authError) && (
+              <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs animate-in fade-in duration-150">
+                {clientError || authError}
               </div>
             )}
             {authSuccessMsg && (
@@ -153,7 +204,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             )}
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
               {mode === 'register' && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-[#F5F7FA]">Full Name</label>
@@ -162,6 +213,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     <input
                       type="text"
                       required
+                      name="name"
+                      autoComplete="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Alex Rivera"
@@ -178,6 +231,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <input
                     type="email"
                     required
+                    name="email"
+                    autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@company.com"
@@ -187,26 +242,71 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#F5F7FA]">Password</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[#F5F7FA]">Password</label>
+                  {mode === 'register' && (
+                    <span className="text-[10px] text-[#9299A8]">Min. 8 chars (letters + numbers)</span>
+                  )}
+                </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9299A8]" />
                   <input
                     type={showPass ? 'text' : 'password'}
                     required
+                    name="password"
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    data-1p-ignore="true"
+                    data-lpignore="true"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-[#111722] border border-white/[0.08] focus:border-[#1558C9] text-white text-xs outline-none transition-colors"
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-[#111722] border border-white/[0.08] focus:border-[#1558C9] text-white text-xs outline-none transition-colors font-mono"
                   />
                   <button
                     type="button"
+                    tabIndex={-1}
                     onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9299A8] hover:text-white"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9299A8] hover:text-white transition-colors"
                   >
                     {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
+
+              {mode === 'register' && (
+                <div className="space-y-1.5 animate-in fade-in duration-150">
+                  <label className="text-xs font-medium text-[#F5F7FA]">Confirm Password</label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9299A8]" />
+                    <input
+                      type={showConfirmPass ? 'text' : 'password'}
+                      required
+                      name="confirmPassword"
+                      autoComplete="new-password"
+                      data-1p-ignore="true"
+                      data-lpignore="true"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-[#111722] border border-white/[0.08] focus:border-[#1558C9] text-white text-xs outline-none transition-colors font-mono"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowConfirmPass(!showConfirmPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9299A8] hover:text-white transition-colors"
+                    >
+                      {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <button
                 type="submit"
