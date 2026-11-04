@@ -21,7 +21,23 @@ export function structuredLogger(req: Request, res: Response, next: NextFunction
     };
 
     if (res.statusCode >= 500) {
-      console.error('[HTTP ERROR]', JSON.stringify(logPayload));
+      const errDetails = res.locals?.errorDetails;
+      const errorSummary = errDetails
+        ? {
+            name: errDetails.name,
+            message: errDetails.message,
+            code: errDetails.code,
+            prismaCode: errDetails.prismaCode,
+          }
+        : undefined;
+
+      console.error(
+        '[HTTP ERROR]',
+        JSON.stringify({
+          ...logPayload,
+          error: errorSummary,
+        })
+      );
     } else if (res.statusCode >= 400) {
       console.warn('[HTTP WARN]', JSON.stringify(logPayload));
     } else {

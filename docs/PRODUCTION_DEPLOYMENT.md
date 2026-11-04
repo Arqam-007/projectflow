@@ -100,6 +100,34 @@ Database seeding (`prisma/seed.ts`) is strictly disabled in production by defaul
 FORCE_PROD_SEED="true" npx tsx prisma/seed.ts
 ```
 
+### 4.3 Render & Neon Serverless PostgreSQL Deployment Guide
+When deploying ProjectFlow to Render with Neon PostgreSQL:
+
+1. **Required Environment Variables in Render Dashboard**:
+   - `NODE_ENV`: `production`
+   - `DATABASE_URL`: `postgresql://[user]:[password]@[neon-hostname]/[database]?sslmode=require`
+     *(Ensure `?sslmode=require` is appended. For pooled connections with PgBouncer, ensure direct URL is used for migrations)*
+   - `JWT_SECRET`: 64+ char random hex string
+   - `PORT`: `3000` (or leave default assigned by Render)
+   - `STRICT_POSTGRES`: `true`
+
+2. **Render Web Service Settings**:
+   - **Environment**: `Node` or `Docker`
+   - **Build Command**: `npm ci && npm run prisma:generate && npm run build`
+   - **Pre-Deploy Command** *(Critical for Neon)*: `npx prisma migrate deploy`
+     *(Applying migrations in the Pre-Deploy step ensures tables like `users` exist before traffic reaches the app)*
+   - **Start Command**: `npm start`
+
+3. **Diagnosing Unhandled Exceptions**:
+   - Check Render logs for single-line `[SERVER EXCEPTION]` and `[HTTP ERROR]` entries.
+   - Correlate by `requestId`.
+   - Identify `prismaCode`:
+     - `P2021`: Table does not exist $\rightarrow$ Run `npx prisma migrate deploy`.
+     - `P1001`: Cannot reach database server $\rightarrow$ Verify Neon compute is active, `DATABASE_URL` is set, and `?sslmode=require` is present.
+     - `P1000`: Authentication failed $\rightarrow$ Check Neon user password.
+     - `P2002`: Unique constraint violation $\rightarrow$ User with email already exists.
+
+
 ---
 
 ## 5. PostgreSQL Backup & Restore Procedures

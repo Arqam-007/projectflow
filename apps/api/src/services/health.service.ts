@@ -7,7 +7,10 @@ export class HealthService {
   public async getHealth(checkDb = true): Promise<HealthResponse> {
     const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
 
-    const isDbConfigured = Boolean(config.DATABASE_URL && config.DATABASE_URL.startsWith('postgresql://'));
+    const isDbConfigured = Boolean(
+      config.DATABASE_URL &&
+        (config.DATABASE_URL.startsWith('postgresql://') || config.DATABASE_URL.startsWith('postgres://'))
+    );
     let isDbConnected = false;
     let dbMessage = 'PostgreSQL is not configured. Run `docker compose up -d` locally to start PostgreSQL.';
 
@@ -23,7 +26,8 @@ export class HealthService {
       } catch (err) {
         isDbConnected = false;
         const msg = err instanceof Error ? err.message : String(err);
-        dbMessage = `PostgreSQL configured at DATABASE_URL but unreachable (${msg.split('\n')[0]}). Ensure Docker container is running locally.`;
+        const { sanitizeLogText } = await import('../middleware/errorHandler.js');
+        dbMessage = `PostgreSQL configured at DATABASE_URL but unreachable (${sanitizeLogText(msg.split('\n')[0])}). Ensure PostgreSQL is running.`;
       }
     }
 

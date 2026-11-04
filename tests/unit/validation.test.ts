@@ -60,4 +60,53 @@ describe('Shared Zod Schemas Validation', () => {
       expect(validateProjectKey('PROJ123').isValid).toBe(true);
     });
   });
+
+  describe('Safe Server-Side Error Logging & Secret Sanitization', () => {
+    it('redacts database credentials from error messages and stacks', async () => {
+      const { sanitizeLogText } = await import('../../apps/api/src/middleware/errorHandler.js');
+
+      const rawDbError =
+        "Can't reach database server at postgresql://postgres:SuperSecretPassword123!@ep-cool-fog-1234.us-east-2.aws.neon.tech:5432/projectflow?sslmode=require";
+      const sanitized = sanitizeLogText(rawDbError);
+
+      expect(sanitized).not.toContain('SuperSecretPassword123!');
+      expect(sanitized).toContain('postgresql://postgres:***@ep-cool-fog-1234.us-east-2.aws.neon.tech:5432/projectflow?sslmode=require');
+    });
+
+    it('redacts JWT access tokens and password parameters', async () => {
+      const { sanitizeLogText } = await import('../../apps/api/src/middleware/errorHandler.js');
+
+      const rawJwt = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMjMifQ.abc123xyz-signature';
+      const sanitizedJwt = sanitizeLogText(`Failed with token: ${rawJwt}`);
+      expect(sanitizedJwt).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
+      expect(sanitizedJwt).toContain('[REDACTED_JWT]');
+
+      const rawPass = '{"email":"test@example.com","password":"MySuperSecretPassword!"}';
+      const sanitizedPass = sanitizeLogText(rawPass);
+      expect(sanitizedPass).not.toContain('MySuperSecretPassword!');
+      expect(sanitizedPass).toContain('"password":"***"');
+    });
+
+    it('extracts Prisma error codes and structured details safely', async () => {
+      const { extractSafeErrorDetails } = await import('../../apps/api/src/middleware/errorHandler.js');
+
+      const prismaError = Object.assign(
+        new Error('The table public.users does not exist in the current database at postgresql://neon_user:neon_pass@neon.tech/db'),
+        {
+          name: 'PrismaClientKnownRequestError',
+          code: 'P2021',
+          clientVersion: '6.19.3',
+          meta: { modelName: 'User' },
+        }
+      );
+
+      const details = extractSafeErrorDetails(prismaError);
+      expect(details.name).toBe('PrismaClientKnownRequestError');
+      expect(details.prismaCode).toBe('P2021');
+      expect(details.code).toBe('P2021');
+      expect(details.clientVersion).toBe('6.19.3');
+      expect(details.message).not.toContain('neon_pass');
+      expect(details.message).toContain('neon_user:***@neon.tech/db');
+    });
+  });
 });
